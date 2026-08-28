@@ -11,7 +11,7 @@
 #   pipeline       ingest, extract
 #   app            도메인 서비스 14개
 #
-# 아직 파일에 들어 있는 것은 infra 의 postgres·kafka 와 tools 의 kafka-ui 뿐임
+# 아직 파일에 들어 있는 것은 infra 의 postgres·kafka·redis 와 tools 의 kafka-ui 뿐임
 # 나머지는 해당 레포가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가함
 #
 # 실행
@@ -133,6 +133,27 @@ services:
       # KRaft 최초 기동은 스토리지 포맷까지 하므로 첫 헬스체크를 늦게 시작함
       start_period: 30s
     mem_limit: 1g
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
+  # 쓰는 곳은 리프레시 토큰, 판정 캐시, 조회수, 최근 본 장소, 비밀번호 재설정 코드임
+  # 로컬에서는 영속이 필요 없으므로 볼륨을 잡지 않음
+  redis:
+    image: redis:8.2-alpine
+    container_name: pawtrail-redis
+    profiles: [infra]
+    environment:
+      TZ: Asia/Seoul
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 256m
     networks: [pawtrail]
 
   # ---------------------------------------------------------------------------
