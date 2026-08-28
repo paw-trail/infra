@@ -182,6 +182,100 @@ services:
     mem_limit: 512m
     networks: [pawtrail]
 
+  # ---------------------------------------------------------------------------
+  # Prometheus
+  # ---------------------------------------------------------------------------
+  # TODO: 첫 pull 이후 실제 버전으로 고정할 것
+  #      docker image inspect prom/prometheus:latest --format '{{index .Config.Labels "org.opencontainers.image.version"}}'
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: pawtrail-prometheus
+    profiles: [observability]
+    environment:
+      TZ: Asia/Seoul
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # 로컬은 보관 기간을 짧게 잡아 디스크를 아낌
+      - --storage.tsdb.retention.time=7d
+      # /-/reload 로 설정을 다시 읽게 함
+      # 타깃을 추가할 때마다 컨테이너를 재시작하지 않아도 됨
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    mem_limit: 512m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
+  # Loki
+  # ---------------------------------------------------------------------------
+  # 로그는 loki-logback-appender 로 애플리케이션이 직접 push 함
+  # 도커 로그 드라이버나 수집 에이전트를 두지 않는 이유는 도메인 서비스를 IntelliJ 에서 돌리기 때문임
+  # 컨테이너 밖에서 도는 프로세스의 로그는 그 둘로는 잡히지 않음
+  #
+  # 이미지에 기본 설정 파일이 들어 있어 단일 바이너리 모드로 바로 뜸
+  # 로컬에서는 보관이 필요 없으므로 볼륨을 잡지 않음
+  loki:
+    image: grafana/loki:latest
+    container_name: pawtrail-loki
+    profiles: [observability]
+    environment:
+      TZ: Asia/Seoul
+    ports:
+      - "3100:3100"
+    mem_limit: 512m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
+  # Zipkin
+  # ---------------------------------------------------------------------------
+  # 저장소는 기본값인 인메모리를 씀
+  # 로컬에서 지난 트레이스를 다시 볼 일이 없고 컨테이너가 자주 재생성되므로 볼륨이 의미가 없음
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: pawtrail-zipkin
+    profiles: [observability]
+    environment:
+      TZ: Asia/Seoul
+    ports:
+      - "9411:9411"
+    mem_limit: 512m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
+  # Grafana
+  # ---------------------------------------------------------------------------
+  # 데이터소스 3개는 provisioning 으로 자동 등록됨
+  # 볼륨을 안 잡았으므로 컨테이너를 새로 만들면 대시보드는 사라지지만
+  # 데이터소스는 매번 같은 상태로 다시 뜸
+  grafana:
+    image: grafana/grafana:latest
+    container_name: pawtrail-grafana
+    profiles: [observability]
+    depends_on:
+      - prometheus
+      - loki
+      - zipkin
+    environment:
+      TZ: Asia/Seoul
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      # 첫 로그인 시 비밀번호 변경을 강요하지 않음
+      GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "false"
+      # 로컬에서는 익명 열람을 허용해 매번 로그인하지 않게 함
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # 플러그인 설치 시도를 막아 오프라인에서도 조용히 뜸
+      GF_INSTALL_PLUGINS: ""
+    ports:
+      # 우리 포트 배정은 3000 이고 프론트를 5173 으로 뺀 이유가 이것임
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    mem_limit: 512m
+    networks: [pawtrail]
+
 volumes:
   postgres_data:
   # Kafka 로그 디렉터리는 named volume 으로 잡지 않음

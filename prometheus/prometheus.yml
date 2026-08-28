@@ -1,0 +1,47 @@
+# =============================================================================
+# Prometheus 수집 설정 (로컬 개발용)
+# =============================================================================
+# *타깃을 localhost 가 아니라 host.docker.internal 로 잡는 이유
+#   Prometheus 는 컨테이너 안에서 도는데 도메인 서비스는 IntelliJ 에서 돎
+#   컨테이너 입장에서 localhost 는 자기 자신이라 스프링 서비스를 못 찾음
+#   host.docker.internal 은 Docker Desktop 이 호스트를 가리키도록 넣어 주는 이름임
+#
+# *배포 환경에서는 이 파일을 그대로 쓰면 안 됨
+#   EC2 에서는 서비스가 전부 컨테이너이므로 타깃이 place-service:8084 처럼 서비스명이 되고
+#   리눅스에는 host.docker.internal 이 기본으로 없음
+#   그때 prometheus-prod.yml 을 따로 두고 compose override 로 갈아끼울 것
+#
+# 서비스가 늘면 targets 에 포트를 계속 추가함
+# 14개가 되면 목록이 길어지므로 유레카 기반 디스커버리 전환을 그때 판단
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    env: local
+
+scrape_configs:
+
+  # Prometheus 자기 자신
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # 스프링 서비스
+  # 액추에이터 노출 경로가 /actuator/prometheus 라 metrics_path 를 바꿔야 함
+  # 기본값 /metrics 로 두면 404 만 받고 조용히 아무것도 안 모임
+  - job_name: spring-services
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # 포트 배정은 도메인 서비스가 8081 부터 순서대로임
+      # 지금은 IntelliJ 로 돌리는 것만 적어 두고 늘어날 때마다 추가함
+      - targets:
+          - "host.docker.internal:8080"
+        labels:
+          application: verify-service
+
+  # Loki 자체 메트릭
+  - job_name: loki
+    static_configs:
+      - targets: ["loki:3100"]
