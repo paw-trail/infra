@@ -291,17 +291,33 @@ docker compose --profile db down -v
 
 ## 6. 서비스를 연결할 때
 
-IntelliJ에서 도메인 서비스를 실행할 때 사용하는 값입니다.
+**접속 주소는 서비스 저장소가 아니라 `paw-trail/config` 저장소에 있습니다.** 각 서비스의 `application.yml` 에는 세 줄만 있고, 나머지는 설정 서버가 내려줍니다. 아래는 그중 이 저장소와 관련된 값들이며, 어디에 적혀 있는지를 함께 표시했습니다.
 
 ```
-DB_HOST                         팀에서 전달받은 공용 인스턴스 주소
-spring.datasource.url           jdbc:postgresql://${DB_HOST}:5432/<서비스>_db
-spring.datasource.username      <서비스>_svc
-spring.kafka.bootstrap-servers  localhost:29092
-spring.data.redis.host          localhost
+config/application-local.yml    app.datasource.host              ${DB_HOST}
+                                spring.kafka.bootstrap-servers   localhost:29092
+                                spring.data.redis.host           localhost
+
+config/<서비스명>.yml            spring.datasource.url            jdbc:postgresql://${app.datasource.host}:5432/<서비스>_db
+                                spring.datasource.username       <서비스>_svc
+
+config/application.yml          spring.datasource.password       ${SERVICE_DB_PASSWORD}
 ```
+
+데이터베이스 주소를 한 곳에만 적는 이유는, 장애로 데이터베이스를 승격했을 때 **`app.datasource.host` 한 줄만 고치면 모든 서비스가 따라오기 때문**입니다. 서비스마다 전체 주소를 적어 두면 열네 곳을 고쳐야 합니다.
 
 Kafka는 반드시 **29092** 를 사용합니다. 9092는 컨테이너끼리 쓰는 주소입니다.
+
+### IntelliJ 실행 구성에 넣는 환경 변수
+
+```
+DB_HOST                 팀에서 전달받은 공용 인스턴스 주소
+SERVICE_DB_PASSWORD     .env 에 넣은 값과 같은 값
+```
+
+**`SERVICE_DB_PASSWORD` 는 이 저장소의 `.env` 에 넣은 값과 같아야 합니다.** 계정을 만들 때 쓰는 값과 접속할 때 쓰는 값이 같은 것이므로 이름도 같게 두었습니다.
+
+`.env` 는 Docker Compose 가 읽는 파일이므로, IntelliJ 로 띄우는 서비스에는 실행 구성의 Environment variables 칸에 직접 넣어야 합니다.
 
 공용 인스턴스에 접속하려면 본인의 공인 IP가 보안그룹에 등록되어 있어야 합니다. 회선이 바뀌거나 공인 IP가 갱신되면 다시 등록해야 하므로, 접속이 갑자기 되지 않을 때 이 부분을 먼저 확인합니다.
 
@@ -314,11 +330,10 @@ docker compose --profile db up -d
 docker compose exec kafka bash /opt/scripts/create-topics.sh   # 필요한 경우
 ```
 
-이때는 접속 주소만 바꾸면 됩니다. 파일을 고치지 않고 실행 구성의 환경 변수로 덮어쓸 수 있습니다.
+이때는 `DB_HOST` 만 바꾸면 됩니다. 설정 파일을 고칠 필요 없이 실행 구성의 환경 변수로 덮어씁니다.
 
 ```
 DB_HOST                    localhost
-SERVICE_DB_PASSWORD        .env 에 넣은 값
 ```
 
 **작업이 끝나면 로컬 인스턴스를 내립니다.** 두 인스턴스가 함께 떠 있으면 어느 쪽에 연결되었는지 헷갈립니다.
