@@ -3,7 +3,8 @@
 # =============================================================================
 # 파일은 한 벌이고 켤 컨테이너는 프로파일로 고름
 #
-#   infra          postgres, kafka, redis
+#   infra          kafka, redis
+#   db             postgres (평소에는 켜지 않음, EC2 공용 인스턴스를 씀)
 #   platform       gateway-server, eureka-server, config-server
 #   observability  prometheus, grafana, loki, zipkin
 #   edge           nginx
@@ -11,12 +12,16 @@
 #   pipeline       ingest, extract
 #   app            도메인 서비스 14개
 #
-# 아직 파일에 들어 있는 것은 infra 의 postgres·kafka·redis 와 tools 의 kafka-ui 뿐임
+# 아직 파일에 들어 있는 것은 infra 의 kafka·redis, db 의 postgres,
+# observability 4종, tools 의 kafka-ui 임
 # 나머지는 해당 레포가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가함
 #
 # 실행
-#   docker compose --profile infra --profile tools up -d
-#   .env 에 COMPOSE_PROFILES 가 있으면 docker compose up -d 만으로 같은 조합이 뜸
+#   docker compose up -d
+#   .env 의 COMPOSE_PROFILES 가 평소 조합을 정하며 기본값은 infra,tools,observability 임
+#
+# 독립된 DB 가 필요할 때만 db 프로파일을 함께 켬
+#   docker compose --profile db up -d
 #
 # 문법만 검사(컨테이너는 안 띄움)
 #   docker compose config
@@ -30,6 +35,13 @@ services:
   # ---------------------------------------------------------------------------
   # PostgreSQL + PostGIS
   # ---------------------------------------------------------------------------
+  # 평소 개발에서는 EC2 공용 인스턴스를 쓰므로 이것을 띄우지 않음
+  # 수집 데이터를 함께 써야 하고(수집 API 에 하루 호출 제한이 있음)
+  # 추출 배치가 GPU 를 요구해 각자 재현할 수 없기 때문임
+  #
+  # 그럼에도 이 블록과 init-db/ 를 남겨 두는 이유는 둘임
+  #   공통 모듈 검증처럼 독립된 DB 가 필요할 때 --profile db 로 켬
+  #   EC2 에 PostgreSQL 을 세울 때 같은 init 스크립트를 그대로 씀
   postgres:
     image: postgis/postgis:17-3.5
     # postgis/postgis 는 공식적으로 amd64 만 지원함(README "Supported architecture: amd64")
@@ -37,7 +49,7 @@ services:
     # 경고인지 오류인지 헷갈리므로 의도적으로 에뮬레이션한다는 것을 표시해 둠
     platform: linux/amd64
     container_name: pawtrail-postgres
-    profiles: [infra]
+    profiles: [db]
     environment:
       # 컨테이너 기본 시간대는 UTC 임
       # 모든 시각을 timestamp(시간대 없음) + LocalDateTime 으로 통일했으므로
@@ -74,6 +86,8 @@ services:
   # ---------------------------------------------------------------------------
   # Kafka (KRaft 겸임 모드 - 브로커와 컨트롤러가 한 프로세스)
   # ---------------------------------------------------------------------------
+  # PostgreSQL 과 달리 각자 로컬에 두는 이유는 공용으로 쓰면
+  # 한 사람이 발행한 이벤트를 다른 사람의 컨슈머가 가져가 서로의 테스트가 섞이기 때문임
   kafka:
     image: apache/kafka:4.1.2
     container_name: pawtrail-kafka
@@ -264,6 +278,7 @@ services:
       # 첫 로그인 시 비밀번호 변경을 강요하지 않음
       GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "false"
       # 로컬에서는 익명 열람을 허용해 매번 로그인하지 않게 함
+      # 다만 익명은 Viewer 라 데이터소스 메뉴가 보이지 않으므로 설정을 볼 때는 로그인해야 함
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       # 플러그인 설치 시도를 막아 오프라인에서도 조용히 뜸
