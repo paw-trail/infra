@@ -474,6 +474,43 @@ git reset --hard
 
 **편집기** — 이 저장소의 파일은 IntelliJ로 편집합니다. 메모장으로 만든 셸 스크립트는 CRLF, BOM, `.txt` 확장자 자동 부착 세 가지 문제가 모두 같은 오류 메시지로 나타나 구분되지 않습니다. 저장소에 `.editorconfig` 가 있어 IntelliJ는 별도 설정 없이 LF로 저장합니다.
 
+**포트 예약** — 어제까지 잘 뜨던 컨테이너가 갑자기 아래 오류로 실패할 때가 있습니다.
+
+```
+Error response from daemon: ports are not available: exposing port TCP 0.0.0.0:3100 -> ...
+: An attempt was made to access a socket in a way forbidden by its access permissions.
+```
+
+**다른 프로그램이 그 포트를 쓰고 있다는 뜻이 아니라, 윈도우가 그 포트를 못 쓰게 막았다는 뜻입니다.** Hyper-V와 WSL2가 부팅할 때 TCP 포트 대역을 100개 단위로 예약해 가는데, 그 범위가 **부팅할 때마다 달라지므로** 어제 되던 포트가 오늘 안 되는 일이 생깁니다. 3000, 3100, 5432, 6379, 9000, 9090, 9411, 29092 중 어느 것이든 걸릴 수 있습니다.
+
+먼저 진짜로 예약된 것인지 확인합니다. **관리자 권한 PowerShell**이 필요합니다.
+
+```powershell
+netstat -ano | findstr :3100
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+첫 번째 명령은 **아무것도 나오지 않는 것이 정상**입니다. 무언가 나온다면 실제로 다른 프로세스가 점유한 것이므로 원인이 다릅니다. 두 번째 명령의 표에서 문제의 포트가 어느 범위 안에 들어가는지 확인합니다.
+
+```
+시작 포트    끝 포트
+----------    --------
+      3027        3126        ← 3100 이 이 범위에 갇혀 있습니다
+```
+
+해결은 NAT 서비스를 다시 시작하는 것입니다. 예약이 풀립니다.
+
+```powershell
+net stop winnat
+net start winnat
+```
+
+`winnat` 은 도커와 WSL의 포트 매핑을 담당하므로 재시작 중에는 실행 중인 컨테이너의 네트워크가 잠시 끊깁니다. 다시 확인해 문제의 포트가 어느 범위에도 없으면 `docker compose up -d` 로 재기동합니다.
+
+재부팅할 때마다 반복된다면 해당 포트를 영구히 제외하거나(`netsh int ipv4 add excludedportrange ... store=persistent`), Compose의 호스트 포트를 예약 대역 밖으로 옮깁니다. **후자를 택할 때는 config 저장소의 `app.logging.loki.url` 처럼 그 포트를 가리키는 값도 함께 고쳐야 합니다.**
+
+이 문제는 Hyper-V와 WSL2 고유의 것이므로 macOS에서는 발생하지 않습니다.
+
 ### macOS (Apple Silicon)
 
 `postgis/postgis` 이미지는 amd64만 제공하므로 Compose에 `platform: linux/amd64` 를 명시해 두었습니다. 에뮬레이션으로 동작하며 로컬 개발에는 지장이 없습니다.
