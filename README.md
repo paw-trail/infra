@@ -115,7 +115,7 @@ Compose 파일은 한 벌이고, 켤 컨테이너는 프로파일로 고릅니�
 | `tools` | kafka-ui | 토픽에 메시지가 실렸는지 확인할 때 | 구현 완료 |
 | `observability` | prometheus, loki, zipkin, grafana | 로그·메트릭·추적을 볼 때 | 구현 완료 |
 | `db` | postgres | **독립된 데이터베이스가 필요할 때만** | 구현 완료 |
-| `platform` | gateway-server, eureka-server, config-server | 게이트웨이를 거친 호출을 확인할 때 | 해당 저장소 완성 후 추가 |
+| `platform` | gateway-server, eureka-server, config-server | 게이트웨이를 거친 호출을 확인할 때 | **저장소 3개 완성, 이미지 등록 후 추가** |
 | `edge` | nginx | 프론트엔드와 함께 확인할 때 | 프론트엔드 통합 시 추가 |
 | `pipeline` | ingest, extract | 수집·추출 배치를 돌릴 때만 | 해당 저장소 완성 후 추가 |
 | `app` | 도메인 서비스 14개 | 배포 검증 때만 | 배포 검증 시 추가 |
@@ -142,6 +142,8 @@ docker compose --profile db up -d
 
 ### 4-1. 포트
 
+**인프라**
+
 | 서비스 | 포트 | 비고 |
 |---|---|---|
 | PostgreSQL | 5432 | |
@@ -153,6 +155,16 @@ docker compose --profile db up -d
 | Grafana | 3000 | |
 | Loki | 3100 | |
 | Zipkin | 9411 | |
+
+**플랫폼** — 이 저장소가 띄우지는 않지만 함께 도는 것들입니다.
+
+| 서비스 | 포트 | 비고 |
+|---|---|---|
+| gateway-server | 8080 | 브라우저의 모든 요청이 지나갑니다 |
+| eureka-server | 8761 | 대시보드를 브라우저로 엽니다 |
+| config-server | 8888 | 설정을 내려줍니다 |
+
+**Kafka UI 를 9000 에 둔 이유가 여기 있습니다.** 컨테이너 내부는 8080인데 그것을 그대로 열면 게이트웨이와 부딪힙니다. 도메인 서비스는 8081부터 순서대로 배정하며 전체 표는 `service-template` 저장소의 README에 있습니다.
 
 IntelliJ에서 실행하는 서비스는 Kafka에 **29092** 로 접속해야 합니다.
 
@@ -232,15 +244,17 @@ Prometheus는 `prometheus/prometheus.yml` 의 타깃을 수집합니다. 서비�
     metrics_path: /actuator/prometheus
     static_configs:
       - targets:
-          - "host.docker.internal:8888"
+          - "host.docker.internal:8080"
         labels:
-          application: config-server
+          application: gateway-server
 
       - targets:                              # 이렇게 블록째 추가합니다
           - "host.docker.internal:8084"
         labels:
           application: place-service
 ```
+
+지금 등록된 것은 플랫폼 3개(8080 · 8761 · 8888)와 템플릿 실행용(8095)입니다. 도메인 서비스를 만들면 그때 추가합니다.
 
 `metrics_path` 를 바꾸는 것을 잊지 않습니다. 기본값은 `/metrics` 인데 액추에이터의 경로는 `/actuator/prometheus` 라서, 그대로 두면 404만 받고 **오류 없이 아무것도 수집되지 않습니다.**
 
@@ -346,11 +360,40 @@ DB_HOST                    localhost
 
 **작업이 끝나면 로컬 인스턴스를 내립니다.** 두 인스턴스가 함께 떠 있으면 어느 쪽에 연결되었는지 헷갈립니다.
 
+### 게이트웨이를 거쳐 호출하기
+
+서비스를 IntelliJ에서 직접 부르면 포트로 접속하지만(`localhost:8084`), 실제 요청은 게이트웨이를 지납니다. **그 경로로 확인해야 인증과 라우팅까지 함께 검증됩니다.**
+
+```
+직접 호출    localhost:8084/api/v1/places/{id}     인증 헤더가 없는 상태
+게이트웨이   localhost:8080/api/v1/places/{id}     토큰을 확인하고 헤더를 넣어 줌
+```
+
+게이트웨이를 거치려면 세 가지가 필요합니다.
+
+1. `config-server`, `eureka-server`, `gateway-server` 가 떠 있을 것
+2. 내 서비스가 유레카에 등록되어 있을 것 — `http://localhost:8761` 에서 확인합니다
+3. **`config` 저장소의 `gateway-server.yml` 에 내 서비스의 라우트가 있을 것**
+
+3번이 가장 빠지기 쉽습니다. 라우트가 없으면 게이트웨이가 404를 돌려주는데, 서비스는 정상으로 떠 있어 원인을 찾기 어렵습니다. 지금 열려 있는 목록은 아래로 확인합니다.
+
+```powershell
+curl.exe http://localhost:8080/actuator/gateway/routes
+```
+
+인증이 필요한 경로를 토큰 없이 부르면 401이 돌아옵니다. 정상 동작이며, 응답 형태는 도메인 서비스와 같습니다.
+
+```json
+{"code":"AUTHENTICATION_FAILED","message":"인증에 실패하였습니다.","data":null,"traceId":"..."}
+```
+
 ### 관측 스택 연결
 
 로그를 Loki로 보내려면 `SPRING_PROFILES_ACTIVE=dev` 를 실행 구성의 환경 변수에 추가합니다. 지정하지 않으면 `local` 로 동작하며 로그는 콘솔에만 출력됩니다.
 
 메트릭과 추적은 프로파일과 무관하게 항상 전송됩니다. Prometheus는 서비스의 `/actuator/prometheus` 를 직접 수집하고, 추적은 애플리케이션이 Zipkin으로 보냅니다.
+
+**추적은 게이트웨이에서 시작됩니다.** 브라우저에서 온 요청이 처음 닿는 곳이라 그곳에서 식별자가 만들어지고, 뒤쪽 서비스들이 그것을 이어받습니다. 게이트웨이를 거치지 않고 서비스를 직접 부르면 그 서비스가 시작점이 되므로, Zipkin에서 요청 전체의 경로를 보려면 게이트웨이를 거쳐 호출합니다.
 
 ---
 
