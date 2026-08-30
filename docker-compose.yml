@@ -12,9 +12,8 @@
 #   pipeline       ingest, extract
 #   app            도메인 서비스 14개
 #
-# 아직 파일에 들어 있는 것은 infra 의 kafka·redis, db 의 postgres,
-# observability 4종, tools 의 kafka-ui 임
-# 나머지는 해당 레포가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가함
+# 아직 파일에 들어 있지 않은 것은 edge 의 nginx, pipeline 2종, app 14종임
+# 해당 저장소가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가함
 #
 # 실행
 #   docker compose up -d
@@ -22,6 +21,17 @@
 #
 # 독립된 DB 가 필요할 때만 db 프로파일을 함께 켬
 #   docker compose --profile db up -d
+#
+# 플랫폼 3종을 컨테이너로 띄울 때
+#   docker compose --profile platform up -d
+#
+#   기동 순서가 정해져 있어 앞엣것이 준비될 때까지 뒤엣것이 기다림
+#   셋이 모두 뜨는 데 1분 남짓 걸리며 진행 상황은 아래로 봄
+#     docker compose ps
+#     STATUS 가 (healthy) 로 바뀌면 준비된 것임
+#
+#   도메인 서비스는 개발 도구에서 띄우고 플랫폼만 컨테이너로 두는 조합이 편함
+#   개발 도구에서 띄운 서비스도 유레카에 등록되며 게이트웨이가 찾아냄
 #
 # 문법만 검사(컨테이너는 안 띄움)
 #   docker compose config
@@ -193,6 +203,110 @@ services:
     ports:
       # 컨테이너 내부는 8080 이고 우리 포트 배정은 9000 임
       - "9000:8080"
+    mem_limit: 512m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
+  # 플랫폼 3종
+  # ---------------------------------------------------------------------------
+  # 이미지는 ghcr 에서 받아 옴
+  # Jenkins 가 생기기 전까지는 각 저장소에서 손으로 만들어 올리며
+  # 그 절차는 README 에 있음
+  #
+  # 기동 순서가 정해져 있음
+  #   config-server → eureka-server → gateway-server
+  # 뒤엣것이 앞엣것에서 설정을 받아 오기 때문임
+  #
+  # * depends_on 만으로는 부족함
+  #   그것은 "컨테이너가 시작됐다" 까지만 보장하고 "설정을 내려줄 준비가 됐다" 는
+  #   보지 않음. 스프링 기동에 몇 초가 걸리므로 그 사이에 뒤엣것이 뜨면
+  #   설정을 못 받은 채 시작됨
+  #   본문 설정에 optional: 이 붙어 있어 그 실패가 조용히 지나가므로
+  #   상태 검사로 실제 준비를 기다림
+  #
+  # * 상태 검사에 wget 을 쓰는 이유
+  #   이미지 바탕이 Alpine 이라 curl 이 없음
+  #   대신 BusyBox 의 wget 이 들어 있고 --spider 는 본문을 받지 않고
+  #   응답 코드만 확인함
+  #   액추에이터가 정상이면 200, 하나라도 문제가 있으면 503 을 주므로
+  #   본문을 따로 들여다볼 필요가 없음
+
+  config-server:
+    image: ghcr.io/paw-trail/config-server:latest
+    container_name: pawtrail-config-server
+    profiles: [platform]
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+      # * 이 서비스만 주소를 직접 넣어 줘야 함
+      #   나머지 둘은 dev 프로파일이 config 저장소에서 주소를 내려주지만
+      #   이 서비스는 자기 설정을 그 저장소에서 받지 않기 때문임
+      #   저장소 주소를 알아야 저장소를 읽을 수 있어 그렇게 둔 것임
+      #
+      #   빠뜨리면 localhost 로 남는데 컨테이너 안에서 그것은 자기 자신이라
+      #   유레카 등록이 영영 실패함
+      #   다만 등록 실패가 기동을 막지는 않아 30초마다 재시도만 반복되므로
+      #   유레카 화면에 이 서비스가 안 보이는 것으로 알아차리게 됨
+      EUREKA_HOST: eureka-server
+      LOKI_HOST: loki
+    ports:
+      - "8888:8888"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8888/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # 스프링 기동에 몇 초가 걸림
+      # 이 시간 동안의 실패는 재시도 횟수에 넣지 않음
+      start_period: 40s
+    mem_limit: 512m
+    networks: [pawtrail]
+
+  eureka-server:
+    image: ghcr.io/paw-trail/eureka-server:latest
+    container_name: pawtrail-eureka-server
+    profiles: [platform]
+    depends_on:
+      config-server:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+      # 설정 서버를 컨테이너 이름으로 찾음
+      # 저장소의 기본값은 localhost 인데 컨테이너 안에서 그것은 자기 자신임
+      CONFIG_HOST: config-server
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8761/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    mem_limit: 512m
+    networks: [pawtrail]
+
+  gateway-server:
+    image: ghcr.io/paw-trail/gateway-server:latest
+    container_name: pawtrail-gateway-server
+    profiles: [platform]
+    depends_on:
+      config-server:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+      CONFIG_HOST: config-server
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     mem_limit: 512m
     networks: [pawtrail]
 
