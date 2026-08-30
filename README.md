@@ -76,7 +76,7 @@ docker compose ps
 
 `kafka` 와 `redis` 는 `Up (healthy)` 가 될 때까지 기다립니다. Kafka는 최초 기동 시 저장소를 포맷하므로 30초 정도 걸립니다.
 
-PostgreSQL은 뜨지 않습니다. `db` 프로파일에 있기 때문이며 의도된 동작입니다. 로컬 데이터베이스가 필요한 경우는 6절을 참고합니다.
+PostgreSQL은 뜨지 않습니다. `db` 프로파일에 있기 때문이며 의도된 동작입니다. 로컬 데이터베이스가 필요한 경우는 7장을 참고합니다.
 
 ### 2-4. Kafka 토픽 생성
 
@@ -115,7 +115,7 @@ Compose 파일은 한 벌이고, 켤 컨테이너는 프로파일로 고릅니�
 | `tools` | kafka-ui | 토픽에 메시지가 실렸는지 확인할 때 | 구현 완료 |
 | `observability` | prometheus, loki, zipkin, grafana | 로그·메트릭·추적을 볼 때 | 구현 완료 |
 | `db` | postgres | **독립된 데이터베이스가 필요할 때만** | 구현 완료 |
-| `platform` | gateway-server, eureka-server, config-server | 게이트웨이를 거친 호출을 확인할 때 | **저장소 3개 완성, 이미지 등록 후 추가** |
+| `platform` | gateway-server, eureka-server, config-server | 게이트웨이를 거친 호출을 확인할 때 | 구현 완료 |
 | `edge` | nginx | 프론트엔드와 함께 확인할 때 | 프론트엔드 통합 시 추가 |
 | `pipeline` | ingest, extract | 수집·추출 배치를 돌릴 때만 | 해당 저장소 완성 후 추가 |
 | `app` | 도메인 서비스 14개 | 배포 검증 때만 | 배포 검증 시 추가 |
@@ -135,6 +135,30 @@ docker compose --profile db up -d
 ```
 
 프로파일 라벨이 없는 서비스는 어떤 프로파일을 켜든 항상 뜹니다. 컨테이너를 추가할 때 `profiles:` 를 빠뜨리지 않습니다.
+
+### 3-1. `platform` 을 켜는 방식
+
+도메인 서비스를 개발할 때는 **플랫폼 3개를 컨테이너로 두고 작업 중인 서비스만 개발 도구에서 실행하는 조합**이 편합니다.
+
+```powershell
+docker compose --profile infra --profile platform up -d
+```
+
+셋은 순서대로 뜨며 앞엣것이 준비될 때까지 뒤엣것이 기다립니다. 뒤엣것이 앞엣것에서 설정을 받아 오기 때문입니다.
+
+```
+config-server → eureka-server → gateway-server
+```
+
+모두 뜨는 데 1분 남짓 걸립니다. 진행 상황은 아래로 봅니다.
+
+```powershell
+docker compose ps
+```
+
+`STATUS` 가 `(health: starting)` 에서 `(healthy)` 로 바뀌면 준비된 것입니다. 상태 검사는 각 서비스의 `/actuator/health` 를 확인하며, 이미지 바탕이 Alpine이라 `curl` 이 없어 BusyBox의 `wget` 을 씁니다.
+
+**개발 도구에서 띄운 서비스도 게이트웨이가 찾아냅니다.** 그쪽은 `local` 프로파일로 동작해 `host.docker.internal` 로 유레카에 등록되는데, 이 이름은 컨테이너 안에서도 호스트를 가리키므로 양쪽에서 통합니다.
 
 ---
 
@@ -311,7 +335,84 @@ docker compose --profile db down -v
 
 ---
 
-## 6. 서비스를 연결할 때
+## 6. 플랫폼 이미지 만들기
+
+`platform` 프로파일은 `image:` 로 ghcr의 이미지를 받아 옵니다. Jenkins가 생기기 전까지는 손으로 만들어 올립니다.
+
+### 6-1. 처음 한 번
+
+컨테이너 저장소에 로그인합니다. 자격 증명은 Docker Desktop이 기억하므로 **기기당 한 번**만 하면 됩니다.
+
+```powershell
+docker login ghcr.io -u <GitHub 아이디>
+```
+
+- **사용자명은 GitHub 아이디입니다.** 윈도우 계정명이 아닙니다
+- **비밀번호 자리에는 개인 접근 토큰을 넣습니다.** 계정 비밀번호는 받지 않습니다. 화면에 아무것도 안 보이는 것이 정상입니다
+- 토큰은 `write:packages` 권한이 있어야 합니다. 공통 모듈을 올릴 때 쓰던 토큰이 있다면 **그것을 그대로 쓸 수 있습니다.** 그 권한 하나가 Maven과 컨테이너 이미지를 모두 덮습니다
+
+환경 변수에 토큰이 이미 있다면 프롬프트 없이 넘길 수도 있습니다.
+
+```powershell
+$env:GPR_TOKEN | docker login ghcr.io -u $env:GPR_USER --password-stdin
+```
+
+### 6-2. 이미지를 만들어 올리기
+
+해당 저장소에서 실행합니다. 예는 설정 서버입니다.
+
+```powershell
+cd ..\config-server
+.\gradlew clean build
+docker build -t ghcr.io/paw-trail/config-server:latest .
+docker push ghcr.io/paw-trail/config-server:latest
+```
+
+**조직명이 `paw-trail` 입니다.** 자바 패키지(`com.pawtrail`)와 철자가 다르므로 주의합니다. 틀리면 올릴 때 권한 오류가 납니다.
+
+이미지 이름은 저장소 이름을 그대로 씁니다.
+
+```
+ghcr.io / paw-trail / <저장소명> : latest
+```
+
+### 6-3. 처음 올린 뒤에 할 것
+
+**컨테이너 이미지는 기본이 비공개입니다.** 그대로 두면 다른 팀원이 받을 수 없어 `--profile platform up` 이 동작하지 않습니다.
+
+```
+조직 Packages → 해당 패키지 → Package settings
+  → Danger Zone → Change package visibility → Public
+```
+
+**공개 선택지가 회색으로 막혀 있다면** 조직 설정에서 먼저 허용해야 합니다. 실수로 내부 이미지를 공개하는 것을 막으려는 기본값입니다.
+
+```
+조직 Settings → Packages → Public 허용
+```
+
+공통 모듈은 이 절차가 필요 없었습니다. **Maven 패키지는 저장소의 공개 여부를 따라가고, 컨테이너 이미지만 이 정책을 따로 받습니다.**
+
+### 6-4. 코드를 고친 뒤
+
+`build → docker build → push` 를 다시 하고 컨테이너를 새로 만듭니다.
+
+```powershell
+docker compose --profile platform pull
+docker compose --profile platform up -d
+```
+
+**다만 대부분은 이미지를 다시 만들 필요가 없습니다.** 포트·주소·라우팅 규칙 같은 설정은 전부 `config` 저장소에 있어, 그쪽을 고치고 서비스를 다시 읽게 하면 됩니다.
+
+```powershell
+curl.exe -X POST http://localhost:8080/actuator/refresh
+```
+
+이미지를 다시 만들어야 하는 것은 **코드와 의존성이 바뀐 경우**뿐입니다.
+
+---
+
+## 7. 서비스를 연결할 때
 
 **접속 주소는 서비스 저장소가 아니라 `paw-trail/config` 저장소에 있습니다.** 각 서비스의 `application.yml` 에는 세 줄만 있고, 나머지는 설정 서버가 내려줍니다. 아래는 그중 이 저장소와 관련된 값들이며, 어디에 적혀 있는지를 함께 표시했습니다.
 
@@ -397,7 +498,7 @@ curl.exe http://localhost:8080/actuator/gateway/routes
 
 ---
 
-## 7. 트러블슈팅
+## 8. 트러블슈팅
 
 ### `docker compose config` 결과가 `services: {}` 입니다
 
@@ -496,7 +597,7 @@ docker compose up -d                                          # 이 저장소
 
 ---
 
-## 8. 환경별 주의사항
+## 9. 환경별 주의사항
 
 ### Windows
 
@@ -564,7 +665,7 @@ net start winnat
 
 ---
 
-## 9. 디렉터리 구조
+## 10. 디렉터리 구조
 
 ```
 infra/
