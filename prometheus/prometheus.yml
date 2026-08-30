@@ -46,6 +46,11 @@ scrape_configs:
           application: config-server
 
       - targets:
+          - "host.docker.internal:8761"
+        labels:
+          application: eureka-server
+
+      - targets:
           - "host.docker.internal:8095"
         labels:
           application: template-service

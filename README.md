@@ -225,16 +225,24 @@ CREATE USER ${role} WITH PASSWORD '${SERVICE_DB_PASSWORD}';
 
 Prometheus는 `prometheus/prometheus.yml` 의 타깃을 수집합니다. 서비스 타깃이 `host.docker.internal` 로 되어 있는 이유는 서비스가 IntelliJ에서 실행되기 때문입니다. Prometheus 컨테이너 입장에서 `localhost` 는 자기 자신이므로 그 주소로는 서비스를 찾지 못합니다.
 
-서비스를 추가하면 `scrape_configs` 의 `targets` 에 포트를 추가합니다.
+서비스를 추가하면 `scrape_configs` 의 `static_configs` 에 블록을 하나 더 넣습니다. 타깃마다 `labels` 를 붙여 두었으므로 Grafana에서 `application` 으로 서비스를 구분할 수 있습니다. 주소만 나열하면 어느 메트릭이 어느 서비스 것인지 구분되지 않습니다.
 
 ```yaml
   - job_name: spring-services
     metrics_path: /actuator/prometheus
     static_configs:
       - targets:
-          - "host.docker.internal:8080"
-          - "host.docker.internal:8084"    # 이렇게 추가합니다
+          - "host.docker.internal:8888"
+        labels:
+          application: config-server
+
+      - targets:                              # 이렇게 블록째 추가합니다
+          - "host.docker.internal:8084"
+        labels:
+          application: place-service
 ```
+
+`metrics_path` 를 바꾸는 것을 잊지 않습니다. 기본값은 `/metrics` 인데 액추에이터의 경로는 `/actuator/prometheus` 라서, 그대로 두면 404만 받고 **오류 없이 아무것도 수집되지 않습니다.**
 
 Grafana 데이터소스 3개는 `grafana/provisioning/datasources/datasources.yml` 로 자동 등록됩니다. 컨테이너를 다시 만들어도 같은 상태로 뜹니다.
 
