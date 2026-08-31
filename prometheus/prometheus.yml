@@ -56,6 +56,11 @@ scrape_configs:
           application: eureka-server
 
       - targets:
+          - "host.docker.internal:8081"
+        labels:
+          application: auth-service
+
+      - targets:
           - "host.docker.internal:8095"
         labels:
           application: template-service

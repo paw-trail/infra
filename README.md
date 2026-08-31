@@ -88,13 +88,13 @@ docker compose exec kafka bash /opt/scripts/create-topics.sh
 
 호스트 셸이 아니라 컨테이너 안에서 실행하는 스크립트입니다. PowerShell은 `.sh` 파일을 직접 실행하지 못하므로, 이 방식이어야 Windows와 macOS에서 같은 명령을 사용할 수 있습니다.
 
-토픽 10개(도메인 이벤트 5개 + DLQ 5개)가 생성되고 목록이 출력되면 완료입니다.
+토픽 12개(도메인 이벤트 6개 + DLQ 6개)가 생성되고 목록이 출력되면 완료입니다.
 
 ### 2-5. 확인
 
 | 확인 대상 | 주소 | 기대 결과 |
 |---|---|---|
-| Kafka UI | http://localhost:9000 | 토픽 10개 |
+| Kafka UI | http://localhost:9000 | 토픽 12개 |
 | Prometheus | http://localhost:9090/targets | `prometheus`, `loki` 가 UP |
 | Grafana | http://localhost:3000 | 데이터소스 3개 등록 |
 | Zipkin | http://localhost:9411 | 화면 로딩 |
@@ -135,6 +135,43 @@ COMPOSE_PROFILES=infra,platform,tools
 **`db` 가 없는 것도 의도입니다.** 평소에는 공용 PostgreSQL을 사용하므로 로컬 인스턴스가 함께 뜨면 어느 쪽에 연결되었는지 헷갈립니다. **빌드할 때 쓰는 데이터베이스는 Testcontainers가 따로 띄우므로 이 프로파일과 무관합니다.** `db` 는 공용 인스턴스를 쓸 수 없을 때만 켭니다.
 
 이 파일은 커밋되지 않으므로 사람마다 다른 값을 두어도 됩니다.
+
+#### `--profile` 을 명령에 붙이면 `.env` 값이 무시됩니다
+
+더해지는 것이 아니라 **통째로 대체됩니다.**
+
+```powershell
+# .env 에 infra,platform,tools 가 있어도
+docker compose --profile db up -d
+
+# 뜨는 것은 postgres 하나뿐입니다
+```
+
+`db` 를 잠깐 함께 쓰고 싶다면 필요한 것을 전부 나열합니다.
+
+```powershell
+docker compose --profile db --profile infra --profile platform --profile tools up -d
+```
+
+계속 쓸 것이라면 `.env` 에 넣는 편이 낫습니다.
+
+```properties
+COMPOSE_PROFILES=infra,platform,tools,db
+```
+
+**`down` 도 같은 규칙입니다.** 일부만 지정하면 나머지가 그대로 떠 있고, 네트워크를 쓰는 컨테이너가 남아 있어 아래 메시지가 나옵니다.
+
+```
+! Network infra_pawtrail  Resource is still in use
+```
+
+전부 내리려면 프로파일을 다 적거나 아래를 씁니다.
+
+```powershell
+docker compose down --remove-orphans
+```
+
+`--remove-orphans` 는 프로파일과 무관하게 이 Compose 파일에 정의된 컨테이너를 대상으로 잡습니다.
 
 #### 상황별 조합
 
@@ -291,6 +328,7 @@ CREATE USER ${role} WITH PASSWORD '${SERVICE_DB_PASSWORD}';
 | place.updated | place | search |
 | policy.changed | policy | notification, verdict |
 | pet.profile.updated | pet | verdict |
+| account.created | auth | user |
 | account.withdrawn | auth | user, pet, report, review, notification |
 | report.reviewed | report | notification |
 
@@ -476,14 +514,48 @@ Kafka는 반드시 **29092** 를 사용합니다. 9092는 컨테이너끼리 쓰
 
 ### IntelliJ 실행 구성에 넣는 환경 변수
 
+**빌드는 이 값들이 없어도 통과합니다.** 테스트가 자기 PostgreSQL 컨테이너를 직접 띄우기 때문입니다. 실행 버튼을 누르는 순간부터 필요해집니다.
+
 ```
-DB_HOST                 팀에서 전달받은 공용 인스턴스 주소
+DB_HOST                 공용 인스턴스 주소, 또는 로컬을 쓸 때는 localhost
 SERVICE_DB_PASSWORD     .env 에 넣은 값과 같은 값
 ```
+
+서비스에 따라 더 필요할 수 있습니다. 인증 서비스는 토큰 서명에 쓰는 개인키를 `AUTH_JWT_PRIVATE_KEY_B64` 로 받습니다. **자기 서비스의 config 파일에서 `${...}` 로 적힌 것을 찾으면 그것이 목록입니다.**
 
 **`SERVICE_DB_PASSWORD` 는 이 저장소의 `.env` 에 넣은 값과 같아야 합니다.** 계정을 만들 때 쓰는 값과 접속할 때 쓰는 값이 같은 것이므로 이름도 같게 두었습니다.
 
 `.env` 는 Docker Compose 가 읽는 파일이므로, IntelliJ 로 띄우는 서비스에는 실행 구성의 Environment variables 칸에 직접 넣어야 합니다.
+
+```
+Run/Debug Configurations → 해당 실행 구성 → Environment variables
+```
+
+칸이 안 보이면 `Modify options` 에서 `Environment variables` 를 켭니다.
+
+같은 값을 두 곳에 두는 것이 번거로우면 OS 환경 변수에 넣습니다. IntelliJ 는 그것을 물려받고 Compose 도 `.env` 에 없으면 호스트 환경 변수를 찾습니다.
+
+```powershell
+[Environment]::SetEnvironmentVariable("DB_HOST", "localhost", "User")
+```
+
+**IntelliJ 를 다시 시작해야 반영됩니다.**
+
+#### 빠뜨렸을 때 나오는 오류
+
+메시지가 원인을 알려주지 않으므로 형태를 외워 두는 편이 빠릅니다.
+
+```
+java.net.UnknownHostException: ${DB_HOST}
+```
+
+치환되지 않은 문자열이 그대로 주소로 쓰인 것입니다. **그 변수가 없다는 뜻입니다.**
+
+```
+FATAL: password authentication failed for user "auth_svc"
+```
+
+**계정은 있고 비밀번호만 안 맞는 것입니다.** 계정 자체가 없으면 `role does not exist` 가 나오므로, 이 메시지가 보이면 초기화 스크립트는 정상이고 `SERVICE_DB_PASSWORD` 만 확인하면 됩니다.
 
 공용 인스턴스에 접속하려면 본인의 공인 IP가 보안그룹에 등록되어 있어야 합니다. 회선이 바뀌거나 공인 IP가 갱신되면 다시 등록해야 하므로, 접속이 갑자기 되지 않을 때 이 부분을 먼저 확인합니다.
 
@@ -638,6 +710,41 @@ docker compose up -d                                          # 이 저장소
 
 첫 번째에서 실패하면 Compose 파일과 무관한 문제입니다.
 
+### `failed to set up container networking: network ... not found`
+
+**재부팅한 뒤 자주 나옵니다.** 컨테이너가 옛 네트워크 식별자를 들고 있는데 그 네트워크는 이미 사라진 상태입니다.
+
+```powershell
+docker compose down --remove-orphans
+docker network prune -f
+docker compose up -d
+```
+
+`prune` 은 아무 컨테이너도 쓰지 않는 네트워크만 지우므로 안전합니다.
+
+`down` 에서 `Resource is still in use` 가 나오면 **프로파일을 일부만 지정한 것입니다.** 3장을 참고해 전부 내립니다.
+
+### `ports are not available ... bind: An attempt was made to access a socket in a way forbidden`
+
+포트를 다른 프로그램이 쓰는 것이 아니라 **윈도우가 예약해 버린 것입니다.** Hyper-V 나 WSL 이 동적 포트 대역을 잡으면서 생기며, 재부팅할 때마다 잡는 자리가 달라져 **어제 되던 것이 오늘 안 되기도 합니다.**
+
+어느 대역이 막혀 있는지 봅니다.
+
+```powershell
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+우리가 쓰는 포트(3000·3100·5432·6379·8080·8081~8095·8761·8888·9000·9090·9092·9411·29092)가 그 범위에 들어 있으면 이 문제입니다.
+
+**관리자 PowerShell** 에서 동적 포트 시작점을 우리 대역 위로 올립니다.
+
+```powershell
+netsh int ipv4 set dynamicport tcp start=49152 num=16384
+netsh int ipv6 set dynamicport tcp start=49152 num=16384
+```
+
+`49152` 는 표준이 정한 동적 포트 시작점입니다. **재부팅해야 반영되며**, 그 뒤 위 확인 명령을 다시 실행해 낮은 대역이 사라졌는지 봅니다. 설정은 레지스트리에 남으므로 한 번만 하면 됩니다.
+
 ---
 
 ## 9. 환경별 주의사항
@@ -720,7 +827,7 @@ infra/
 │   ├── 01-databases.sh      데이터베이스 10개와 전용 계정 생성
 │   └── 02-extensions.sh     PostGIS, pg_trgm 설치
 ├── kafka/
-│   └── create-topics.sh     토픽 5개와 DLQ 5개 생성
+│   └── create-topics.sh     토픽 6개와 DLQ 6개 생성
 ├── prometheus/
 │   └── prometheus.yml       수집 타깃
 └── grafana/
