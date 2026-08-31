@@ -65,7 +65,7 @@ GRAFANA_PASSWORD=CHANGE_ME
 docker compose config
 ```
 
-서비스 8개가 출력되면 정상입니다. `services: {}` 만 나오면 `.env` 의 `COMPOSE_PROFILES` 를 확인합니다(7절 참고).
+서비스 6개(kafka, redis, config-server, eureka-server, gateway-server, kafka-ui)가 출력되면 정상입니다. `services: {}` 만 나오면 `.env` 의 `COMPOSE_PROFILES` 를 확인합니다(3절 참고).
 
 ### 2-3. 컨테이너 기동
 
@@ -123,10 +123,47 @@ Compose 파일은 한 벌이고, 켤 컨테이너는 프로파일로 고릅니�
 `.env` 의 `COMPOSE_PROFILES` 가 기본 조합을 정합니다.
 
 ```properties
-COMPOSE_PROFILES=infra,tools,observability
+COMPOSE_PROFILES=infra,platform,tools
 ```
 
-**여기에 `db` 가 없는 것은 의도입니다.** 평소에는 공용 PostgreSQL을 사용하므로 로컬 인스턴스가 함께 뜨면 어느 쪽에 연결되었는지 헷갈립니다.
+`infra` 와 `platform` 은 사실상 필수입니다. **`platform` 이 빠지면 config-server가 없어 서비스가 데이터베이스 주소와 포트를 받지 못하고 기동에 실패합니다.** 증상이 "포트가 8080으로 뜨고 datasource를 만들지 못함"으로 나타나 원인이 프로파일이라는 것이 드러나지 않으므로 반드시 함께 켭니다.
+
+`tools` 는 이벤트가 실제로 토픽에 실렸는지 확인할 수 있는 유일한 수단이므로 함께 둡니다.
+
+**`observability` 가 기본에 없는 것은 의도입니다.** 개발 중 로그는 개발 도구 콘솔에 그대로 나오므로 없어도 지장이 없고, 대시보드나 추적 화면을 볼 때만 켜면 됩니다. 컨테이너 4개가 실사용 기준 0.6GB 남짓을 차지합니다.
+
+**`db` 가 없는 것도 의도입니다.** 평소에는 공용 PostgreSQL을 사용하므로 로컬 인스턴스가 함께 뜨면 어느 쪽에 연결되었는지 헷갈립니다. **빌드할 때 쓰는 데이터베이스는 Testcontainers가 따로 띄우므로 이 프로파일과 무관합니다.** `db` 는 공용 인스턴스를 쓸 수 없을 때만 켭니다.
+
+이 파일은 커밋되지 않으므로 사람마다 다른 값을 두어도 됩니다.
+
+#### 상황별 조합
+
+| 상황 | 조합 |
+|---|---|
+| 평소 개발 | `infra,platform,tools` |
+| 대시보드·추적을 볼 때 | `infra,platform,tools,observability` |
+| 공용 인스턴스를 쓸 수 없을 때 | `infra,platform,tools,db` |
+| 수집 배치를 돌릴 때 | `infra,platform,tools,pipeline` |
+| 배포 형태로 확인할 때 | `infra,platform,observability,edge,app` |
+
+#### 메모리가 16GB인 환경
+
+기본값을 그대로 두고 `observability` 는 볼 일이 있을 때만 켭니다. 대략적인 배분은 아래와 같습니다.
+
+```
+운영체제                        4.5G
+컨테이너 6개                    2.2G
+Docker VM 자체                  0.5G
+개발 도구와 빌드 데몬            3.0G
+개발 도구에서 띄운 서비스 1개     0.6G
+브라우저                        1.0G
+──────────────────────────────────
+합계                          11.8G
+```
+
+`observability` 까지 켠 채로 서비스를 2개 띄우면 여유가 1.5GB 아래로 내려가 스왑이 시작됩니다.
+
+macOS에서는 Docker Desktop의 `Settings > Resources > Memory` 를 6GB로 낮춥니다. 16GB 기기의 기본값이 8GB여서 그대로 두면 호스트 쪽이 부족해집니다. 실제 사용량은 컨테이너 쪽은 `docker stats --no-stream`, 운영체제 쪽은 활성 상태 보기의 **메모리 압력** 그래프로 봅니다. 사용량 숫자보다 이 그래프의 색이 기준이며 초록이면 정상입니다.
 
 다른 조합이 필요하면 명령에 직접 지정합니다. 이 경우 `.env` 값보다 우선합니다.
 
@@ -138,7 +175,13 @@ docker compose --profile db up -d
 
 ### 3-1. `platform` 을 켜는 방식
 
-도메인 서비스를 개발할 때는 **플랫폼 3개를 컨테이너로 두고 작업 중인 서비스만 개발 도구에서 실행하는 조합**이 편합니다.
+도메인 서비스를 개발할 때는 **플랫폼 3개를 컨테이너로 두고 작업 중인 서비스만 개발 도구에서 실행하는 조합**이 편합니다. 기본 조합에 `platform` 이 들어 있으므로 옵션 없이 띄우면 됩니다.
+
+```powershell
+docker compose up -d
+```
+
+`.env` 의 기본 조합을 바꿔 두었다면 명령에 직접 지정합니다.
 
 ```powershell
 docker compose --profile infra --profile platform up -d
