@@ -10,10 +10,13 @@
 #   edge           nginx
 #   tools          kafka-ui
 #   pipeline       ingest, extract
-#   app            도메인 서비스 14개
+#   app            도메인 서비스 (auth 부터 하나씩 추가함)
 #
-# 아직 파일에 들어 있지 않은 것은 edge 의 nginx, pipeline 2종, app 14종임
+# 아직 파일에 들어 있지 않은 것은 edge 의 nginx, pipeline 2종, app 의 나머지 13종임
 # 해당 저장소가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가함
+#
+# app 프로파일은 기본 조합에 얹어서 씀
+#   docker compose --profile app up -d
 #
 # 실행
 #   docker compose up -d
@@ -308,6 +311,54 @@ services:
       retries: 5
       start_period: 40s
     mem_limit: 512m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
+  # 도메인 서비스 (app)
+  # ---------------------------------------------------------------------------
+  # 개발이 끝난 서비스만 여기 둠
+  # 지금 고치고 있는 서비스는 IntelliJ 로 띄우는 편이 빠름 (고칠 때마다 이미지를 다시 구워야 함)
+  #
+  # 이미지를 다시 받는 것은 up 만으로는 안 됨
+  #   docker compose pull auth-service && docker compose --profile app up -d
+  auth-service:
+    image: ghcr.io/paw-trail/auth-service:latest
+    container_name: pawtrail-auth-service
+    profiles: [app]
+    depends_on:
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+
+      # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
+      #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
+      #   값이 사람마다 다르지 않아 .env 로 빼지 않고 여기 적음
+      CONFIG_HOST: config-server
+      DB_HOST: postgres
+
+      # * 아래는 사람마다 다르거나 비밀값이라 .env 에서 읽음
+      #   .env 가 없거나 값이 비면 기동에 실패함 (기본값을 두지 않는 방침)
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+      AUTH_JWT_PRIVATE_KEY_B64: ${AUTH_JWT_PRIVATE_KEY_B64}
+      AUTH_MAIL_PASSWORD: ${AUTH_MAIL_PASSWORD}
+      AUTH_OAUTH_GOOGLE_CLIENT_SECRET: ${AUTH_OAUTH_GOOGLE_CLIENT_SECRET}
+    ports:
+      # 8081 을 여는 이유
+      #   게이트웨이를 거치지 않고 직접 확인할 때 씀
+      #   구글 콘솔에 auth 직결 콜백 주소도 등록해 두었음
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    # Dockerfile 의 -XX:MaxRAMPercentage=70 이 이 값의 70% 까지 힙으로 씀
+    mem_limit: 640m
     networks: [pawtrail]
 
   # ---------------------------------------------------------------------------
