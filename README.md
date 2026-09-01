@@ -1,837 +1,1057 @@
 # infra
 
-함께하개(paw-trail)의 로컬 개발 인프라를 띄우는 저장소입니다. Kafka, Redis, 관측 스택을 Docker Compose 한 벌로 관리하며, 도메인 서비스는 여기서 띄우지 않고 각자 IntelliJ에서 실행합니다.
+**함께하개의 로컬 개발 환경입니다.** DB · 메시지 큐 · 플랫폼 서비스를 컨테이너로
+한 번에 띄웁니다.
 
-**PostgreSQL은 평소에 띄우지 않습니다.** 팀 공용 인스턴스가 AWS EC2에 하나 있고 모두 그것을 사용합니다. 수집 API에 하루 호출 제한이 있어 데이터를 채우는 데 여러 날이 걸리고, 추출 배치는 GPU를 요구해 각자 재현할 수 없기 때문입니다. Compose에 PostgreSQL이 들어 있지만 `db` 프로파일로 분리해 두었으며, 독립된 데이터베이스가 필요할 때만 켭니다.
+```
+[ 내 컴퓨터 ]
 
-Kafka와 Redis를 각자 로컬에 두는 이유는 반대입니다. 공용으로 쓰면 한 사람이 발행한 이벤트를 다른 사람의 컨슈머가 가져가 버려 서로의 테스트가 섞입니다.
+  IntelliJ 로 띄우는 것            지금 고치고 있는 서비스
+        │                          localhost 로 아래에 붙음
+        ▼
+  Docker 네트워크 (pawtrail)
+  │
+  ├── db             postgres                    DB 10개 · 계정 10개
+  │
+  ├── infra          kafka · redis               *거의 항상 켜 둠
+  │
+  ├── platform       config-server   8888        설정을 내려 줌
+  │                  eureka-server   8761        주소 장부
+  │                  gateway-server  8080        모든 요청의 입구
+  │
+  ├── app            auth-service    8081        개발이 끝난 도메인 서비스
+  │                                              (나머지 13개는 아직)
+  │
+  ├── tools          kafka-ui        9000        토픽·메시지 보기
+  │
+  └── observability  prometheus 9090 · loki 3100      필요할 때만
+                     zipkin 9411 · grafana 3000
+```
 
-이 저장소에는 자바 코드가 없습니다. Compose 파일, 초기화 스크립트, 관측 도구 설정만 들어 있습니다.
+<br><br>
 
 ---
 
-## 1. 사전 준비
+## 0. 이 저장소가 하는 일
 
-### 1-1. Docker Desktop
+**서비스를 하나 개발하려면 그 뒤에 여러 개가 필요합니다.**
 
-WSL2 백엔드로 설치합니다. Hyper-V 백엔드는 느리고 `host.docker.internal` 동작이 달라 관측 스택이 서비스를 찾지 못합니다.
+| 만들려는 것 | 필요한 것 |
+|---|---|
+| `place-service` | PostgreSQL · Kafka · Redis · config-server · eureka-server · gateway-server |
+| 그것들을 각자 설치하면 | **버전이 갈리고 "제 컴퓨터에서는 되는데" 가 생김** |
+| 여기서 띄우면 | **명령 한 줄. 누구 컴퓨터에서든 같은 버전** |
 
-설치 후 **Settings → Resources → WSL integration** 에서 다음을 확인합니다.
+---
+
+**숫자로 보면 이렇습니다.**
+
+| | 값 | 어디에 |
+|---|---|---|
+| 컨테이너 | **12개** | [1-1](#1-1-무엇이-들어-있나) |
+| 프로파일 | 6개 | [3장](#3-프로파일--무엇을-띄울지-고르기) |
+| DB | 10개 | [4-2](#4-2-데이터베이스-10개) |
+| Kafka 토픽 | 12개 | [4-3](#4-3-kafka-토픽-12개) |
+| 코드 | **없음** | compose · 셸 스크립트 · 설정 파일만 |
+
+---
+
+**파일이 이게 전부입니다.**
 
 ```
-Enable integration with my default WSL distro    체크 해제
-Ubuntu (또는 설치된 배포판)                        토글 OFF
+paw-trail/infra
+│
+├── docker-compose.yml              컨테이너 12개
+├── .env                            ⛔커밋 안 됨. 각자 만듦
+├── .env.example                    그 목록과 설명
+│
+├── init-db/
+│   ├── 01-databases.sh             DB 10개 · 계정 10개 · 권한
+│   └── 02-extensions.sh            PostGIS · pg_trgm
+│
+├── kafka/create-topics.sh          토픽 12개
+├── prometheus/prometheus.yml       수집 대상
+└── grafana/provisioning/           데이터소스 자동 등록
 ```
 
-도커 엔진은 `docker-desktop` 전용 배포판에서 동작하므로 이 항목을 꺼도 PowerShell의 `docker` 명령에는 영향이 없습니다. 켜 두면 통합 실패 팝업이 반복되며 데몬 통신이 막히는 문제가 발생합니다.
+<br><br>
 
-**Settings → General** 의 `Use the WSL 2 based engine` 은 켜 둡니다.
+---
 
-### 1-2. 저장소 클론
+### 이 문서를 읽는 순서
 
-```powershell
+| 지금 하려는 일 | 볼 곳 |
+|---|---|
+| 처음 세팅한다 | [1장](#1-처음-한-번) → [2장](#2-최초-실행) |
+| 무엇을 띄울지 고르고 싶다 | [3장](#3-프로파일--무엇을-띄울지-고르기) |
+| 포트·DB·토픽이 뭐가 있는지 | [4장](#4-구성-요소) |
+| 자주 쓰는 명령 | [5장](#5-자주-쓰는-명령) |
+| IntelliJ 로 서비스를 띄우려 한다 | [6장](#6-서비스를-붙일-때) |
+| 플랫폼 이미지를 다시 굽는다 | [7장](#7-이미지-만들어-올리기) |
+| 뭔가 안 된다 | [8장](#8-막히기-쉬운-자리) |
+| Windows · macOS 차이 | [9장](#9-환경별-주의사항) |
+
+<br><br>
+
+---
+
+## 1. 처음 한 번
+
+<br><br>
+
+---
+
+### 1-1. 무엇이 들어 있나
+
+| 프로파일 | 컨테이너 | 포트 | 메모리 | 언제 켜나 |
+|---|---|---|---|---|
+| `db` | postgres | 5432 | 1g | **항상** |
+| `infra` | kafka | 9092 · 29092 | 1g | **항상** |
+| | redis | 6379 | 256m | **항상** |
+| `platform` | config-server | 8888 | 512m | **항상** |
+| | eureka-server | 8761 | 512m | **항상** |
+| | gateway-server | 8080 | 512m | **항상** |
+| `app` | auth-service | 8081 | 640m | auth 를 안 고칠 때 |
+| `tools` | kafka-ui | **9000** | 512m | 토픽을 볼 때 |
+| `observability` | prometheus | 9090 | 512m | 지표를 볼 때 |
+| | loki | 3100 | 512m | |
+| | zipkin | 9411 | 512m | |
+| | grafana | 3000 | 512m | |
+
+> **Kafka UI 가 9000 인 이유** — 원래 8080 인데 **게이트웨이와 겹칩니다.**
+
+<br><br>
+
+---
+
+### 1-2. Docker Desktop
+
+**메모리를 4GB 이상 줍니다.**
+
+```
+Settings → Resources → Memory
+```
+
+| 조합 | 대략 |
+|---|---|
+| `infra,platform,db,tools` | 약 4.2G |
+| `+ app` (auth) | 약 4.8G |
+| `+ observability` | 약 6.8G |
+
+> **16GB 머신이면 관측 스택은 필요할 때만 켭니다.**
+> macOS 4.5G + 컨테이너 + Docker VM 0.5G 를 대략 잡으면 그렇습니다.
+
+<br><br>
+
+---
+
+### 1-3. 클론
+
+```bash
 git clone https://github.com/paw-trail/infra.git
 cd infra
 ```
+
+> **셸 스크립트가 있어 줄바꿈이 중요합니다.** `.gitattributes` 가 `.sh` 를 LF 로
+> 강제하므로 Windows 에서 클론해도 정상입니다. **직접 만든 `.sh` 를 넣을 때는
+> 편집기 우하단이 LF 인지 확인합니다** — CRLF 면 컨테이너 안에서
+> `\r: command not found` 가 납니다.
+
+<br><br>
 
 ---
 
 ## 2. 최초 실행
 
-### 2-1. 환경 변수 파일 생성
-
-`.env` 는 저장소에 포함되지 않으므로 각자 만들어야 합니다.
-
-```powershell
-copy .env.example .env      # Windows
-cp .env.example .env        # macOS
+```
+① .env.example 을 복사해 .env 를 만들고 값을 채움
+        │      POSTGRES_PASSWORD · SERVICE_DB_PASSWORD · GRAFANA_PASSWORD
+        │      app 을 켤 거면 AUTH_ 값 3개도
+        ▼
+② docker compose config --services        오타 검사. 서비스 목록이 나오면 정상
+        │
+        ▼
+③ docker compose up -d                    .env 의 COMPOSE_PROFILES 조합대로
+        │
+        ├──▶  postgres 가 처음 뜰 때 init-db 스크립트가 돎
+        │       DB 10개 · 계정 10개 · PostGIS · pg_trgm
+        │
+        ▼
+④ docker compose ps                       전부 (healthy) 인지
+        │
+        ▼
+⑤ kafka/create-topics.sh                  토픽 12개. 멱등이라 여러 번 실행해도 됨
+        │
+        ▼
+⑥ 확인   localhost:8761 · localhost:9000
 ```
 
-`.env` 를 열어 `CHANGE_ME` 로 표시된 값을 채웁니다.
-
-```properties
-POSTGRES_PASSWORD=CHANGE_ME
-SERVICE_DB_PASSWORD=CHANGE_ME
-GRAFANA_PASSWORD=CHANGE_ME
-```
-
-값에 따옴표를 붙이거나 끝에 공백을 두지 않습니다. 그대로 값의 일부가 되어 접속이 실패합니다.
-
-### 2-2. 설정 검사
-
-컨테이너를 띄우지 않고 Compose 파일의 문법과 변수 치환만 확인합니다.
-
-```powershell
-docker compose config
-```
-
-서비스 6개(kafka, redis, config-server, eureka-server, gateway-server, kafka-ui)가 출력되면 정상입니다. `services: {}` 만 나오면 `.env` 의 `COMPOSE_PROFILES` 를 확인합니다(3절 참고).
-
-### 2-3. 컨테이너 기동
-
-```powershell
-docker compose up -d
-docker compose ps
-```
-
-`kafka` 와 `redis` 는 `Up (healthy)` 가 될 때까지 기다립니다. Kafka는 최초 기동 시 저장소를 포맷하므로 30초 정도 걸립니다.
-
-PostgreSQL은 뜨지 않습니다. `db` 프로파일에 있기 때문이며 의도된 동작입니다. 로컬 데이터베이스가 필요한 경우는 7장을 참고합니다.
-
-### 2-4. Kafka 토픽 생성
-
-토픽은 자동 생성이 꺼져 있으므로 스크립트로 만듭니다.
-
-```powershell
-docker compose exec kafka bash /opt/scripts/create-topics.sh
-```
-
-호스트 셸이 아니라 컨테이너 안에서 실행하는 스크립트입니다. PowerShell은 `.sh` 파일을 직접 실행하지 못하므로, 이 방식이어야 Windows와 macOS에서 같은 명령을 사용할 수 있습니다.
-
-토픽 12개(도메인 이벤트 6개 + DLQ 6개)가 생성되고 목록이 출력되면 완료입니다.
-
-### 2-5. 확인
-
-| 확인 대상 | 주소 | 기대 결과 |
-|---|---|---|
-| Kafka UI | http://localhost:9000 | 토픽 12개 |
-| Prometheus | http://localhost:9090/targets | `prometheus`, `loki` 가 UP |
-| Grafana | http://localhost:3000 | 데이터소스 3개 등록 |
-| Zipkin | http://localhost:9411 | 화면 로딩 |
-
-Prometheus의 `spring-services` 타깃은 서비스를 실행하기 전까지 DOWN입니다. 정상입니다.
-
-오류 메시지가 `connect: connection refused` 라면 주소를 올바르게 찾은 뒤 연결만 실패한 것이므로 서비스를 실행하면 UP으로 바뀝니다. `no such host` 라면 주소 해석 단계에서 실패한 것이므로 설정을 확인해야 합니다.
+<br><br>
 
 ---
 
-## 3. 프로파일
+### 2-1. `.env` 만들기
 
-Compose 파일은 한 벌이고, 켤 컨테이너는 프로파일로 고릅니다. 개발용과 배포용으로 파일을 나누지 않는 이유는 두 벌이 되는 순간 한쪽만 고쳐 두 파일이 서로 어긋나기 때문입니다. 배포용 차이가 커지면 파일을 복사하지 말고 override 파일(`-f base -f prod`)로 차이만 적습니다.
+**macOS**
 
-| 프로파일 | 구성 | 언제 켜는가 | 상태 |
-|---|---|---|---|
-| `infra` | kafka, redis | 거의 항상 | 구현 완료 |
-| `tools` | kafka-ui | 토픽에 메시지가 실렸는지 확인할 때 | 구현 완료 |
-| `observability` | prometheus, loki, zipkin, grafana | 로그·메트릭·추적을 볼 때 | 구현 완료 |
-| `db` | postgres | **독립된 데이터베이스가 필요할 때만** | 구현 완료 |
-| `platform` | gateway-server, eureka-server, config-server | 게이트웨이를 거친 호출을 확인할 때 | 구현 완료 |
-| `edge` | nginx | 프론트엔드와 함께 확인할 때 | 프론트엔드 통합 시 추가 |
-| `pipeline` | ingest, extract | 수집·추출 배치를 돌릴 때만 | 해당 저장소 완성 후 추가 |
-| `app` | 도메인 서비스 14개 | 배포 검증 때만 | 배포 검증 시 추가 |
-
-`.env` 의 `COMPOSE_PROFILES` 가 기본 조합을 정합니다.
-
-```properties
-COMPOSE_PROFILES=infra,platform,tools
+```bash
+cp .env.example .env
 ```
 
-`infra` 와 `platform` 은 사실상 필수입니다. **`platform` 이 빠지면 config-server가 없어 서비스가 데이터베이스 주소와 포트를 받지 못하고 기동에 실패합니다.** 증상이 "포트가 8080으로 뜨고 datasource를 만들지 못함"으로 나타나 원인이 프로파일이라는 것이 드러나지 않으므로 반드시 함께 켭니다.
-
-`tools` 는 이벤트가 실제로 토픽에 실렸는지 확인할 수 있는 유일한 수단이므로 함께 둡니다.
-
-**`observability` 가 기본에 없는 것은 의도입니다.** 개발 중 로그는 개발 도구 콘솔에 그대로 나오므로 없어도 지장이 없고, 대시보드나 추적 화면을 볼 때만 켜면 됩니다. 컨테이너 4개가 실사용 기준 0.6GB 남짓을 차지합니다.
-
-**`db` 가 없는 것도 의도입니다.** 평소에는 공용 PostgreSQL을 사용하므로 로컬 인스턴스가 함께 뜨면 어느 쪽에 연결되었는지 헷갈립니다. **빌드할 때 쓰는 데이터베이스는 Testcontainers가 따로 띄우므로 이 프로파일과 무관합니다.** `db` 는 공용 인스턴스를 쓸 수 없을 때만 켭니다.
-
-이 파일은 커밋되지 않으므로 사람마다 다른 값을 두어도 됩니다.
-
-#### `--profile` 을 명령에 붙이면 `.env` 값이 무시됩니다
-
-더해지는 것이 아니라 **통째로 대체됩니다.**
+**Windows (PowerShell)**
 
 ```powershell
-# .env 에 infra,platform,tools 가 있어도
-docker compose --profile db up -d
-
-# 뜨는 것은 postgres 하나뿐입니다
+copy .env.example .env
 ```
 
-`db` 를 잠깐 함께 쓰고 싶다면 필요한 것을 전부 나열합니다.
+**채워야 하는 값입니다.**
 
-```powershell
-docker compose --profile db --profile infra --profile platform --profile tools up -d
+| 이름 | 값 | 필수 |
+|---|---|---|
+| `COMPOSE_PROFILES` | `infra,platform,db,tools` | ✓ |
+| `POSTGRES_USER` | `pawtrail` | ✓ |
+| `POSTGRES_PASSWORD` | 아무 값 | ✓ |
+| `SERVICE_DB_PASSWORD` | 아무 값 — **서비스 계정 10개가 공유** | ✓ |
+| `GRAFANA_USER` · `GRAFANA_PASSWORD` | 아무 값 | ✓ |
+| `AUTH_JWT_PRIVATE_KEY_B64` | 팀장에게 받음 | `app` 켤 때만 |
+| `AUTH_MAIL_PASSWORD` | 팀장에게 받음 | `app` 켤 때만 |
+| `AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | 팀장에게 받음 | `app` 켤 때만 |
+
+> ⛔ **`.env` 는 커밋되지 않습니다.** `.gitignore` 에 있습니다.
+> **비밀값을 `.env.example` 에 적지 않습니다.**
+>
+> **`SERVICE_DB_PASSWORD` 를 나중에 바꾸려면 DB 를 다시 만들어야 합니다.**
+> init 스크립트는 **볼륨이 비어 있을 때만** 돌기 때문입니다.
+
+<br><br>
+
+---
+
+### 2-2. 설정 검사
+
+```bash
+docker compose config --services
 ```
 
-계속 쓸 것이라면 `.env` 에 넣는 편이 낫습니다.
+**서비스 목록이 나오면 정상입니다.**
 
-```properties
-COMPOSE_PROFILES=infra,platform,tools,db
-```
-
-**`down` 도 같은 규칙입니다.** 일부만 지정하면 나머지가 그대로 떠 있고, 네트워크를 쓰는 컨테이너가 남아 있어 아래 메시지가 나옵니다.
-
-```
-! Network infra_pawtrail  Resource is still in use
-```
-
-전부 내리려면 프로파일을 다 적거나 아래를 씁니다.
-
-```powershell
-docker compose down --remove-orphans
-```
-
-`--remove-orphans` 는 프로파일과 무관하게 이 Compose 파일에 정의된 컨테이너를 대상으로 잡습니다.
-
-#### 상황별 조합
-
-| 상황 | 조합 |
+| 결과 | 뜻 |
 |---|---|
-| 평소 개발 | `infra,platform,tools` |
-| 대시보드·추적을 볼 때 | `infra,platform,tools,observability` |
-| 공용 인스턴스를 쓸 수 없을 때 | `infra,platform,tools,db` |
-| 수집 배치를 돌릴 때 | `infra,platform,tools,pipeline` |
-| 배포 형태로 확인할 때 | `infra,platform,observability,edge,app` |
+| 목록이 나옴 | YAML 과 `.env` 가 정상 |
+| `services: {}` | **`COMPOSE_PROFILES` 가 비었거나 오타** |
+| YAML 오류 | 들여쓰기 문제 |
 
-#### 메모리가 16GB인 환경
+<br><br>
 
-기본값을 그대로 두고 `observability` 는 볼 일이 있을 때만 켭니다. 대략적인 배분은 아래와 같습니다.
+---
 
-```
-운영체제                        4.5G
-컨테이너 6개                    2.2G
-Docker VM 자체                  0.5G
-개발 도구와 빌드 데몬            3.0G
-개발 도구에서 띄운 서비스 1개     0.6G
-브라우저                        1.0G
-──────────────────────────────────
-합계                          11.8G
-```
+### 2-3. 기동
 
-`observability` 까지 켠 채로 서비스를 2개 띄우면 여유가 1.5GB 아래로 내려가 스왑이 시작됩니다.
-
-macOS에서는 Docker Desktop의 `Settings > Resources > Memory` 를 6GB로 낮춥니다. 16GB 기기의 기본값이 8GB여서 그대로 두면 호스트 쪽이 부족해집니다. 실제 사용량은 컨테이너 쪽은 `docker stats --no-stream`, 운영체제 쪽은 활성 상태 보기의 **메모리 압력** 그래프로 봅니다. 사용량 숫자보다 이 그래프의 색이 기준이며 초록이면 정상입니다.
-
-다른 조합이 필요하면 명령에 직접 지정합니다. 이 경우 `.env` 값보다 우선합니다.
-
-```powershell
-docker compose --profile db up -d
-```
-
-프로파일 라벨이 없는 서비스는 어떤 프로파일을 켜든 항상 뜹니다. 컨테이너를 추가할 때 `profiles:` 를 빠뜨리지 않습니다.
-
-### 3-1. `platform` 을 켜는 방식
-
-도메인 서비스를 개발할 때는 **플랫폼 3개를 컨테이너로 두고 작업 중인 서비스만 개발 도구에서 실행하는 조합**이 편합니다. 기본 조합에 `platform` 이 들어 있으므로 옵션 없이 띄우면 됩니다.
-
-```powershell
+```bash
 docker compose up -d
-```
-
-`.env` 의 기본 조합을 바꿔 두었다면 명령에 직접 지정합니다.
-
-```powershell
-docker compose --profile infra --profile platform up -d
-```
-
-셋은 순서대로 뜨며 앞엣것이 준비될 때까지 뒤엣것이 기다립니다. 뒤엣것이 앞엣것에서 설정을 받아 오기 때문입니다.
-
-```
-config-server → eureka-server → gateway-server
-```
-
-모두 뜨는 데 1분 남짓 걸립니다. 진행 상황은 아래로 봅니다.
-
-```powershell
 docker compose ps
 ```
 
-`STATUS` 가 `(health: starting)` 에서 `(healthy)` 로 바뀌면 준비된 것입니다. 상태 검사는 각 서비스의 `/actuator/health` 를 확인하며, 이미지 바탕이 Alpine이라 `curl` 이 없어 BusyBox의 `wget` 을 씁니다.
+**`STATUS` 가 전부 `(healthy)` 가 될 때까지 40초쯤 걸립니다.**
 
-**개발 도구에서 띄운 서비스도 게이트웨이가 찾아냅니다.** 그쪽은 `local` 프로파일로 동작해 `host.docker.internal` 로 유레카에 등록되는데, 이 이름은 컨테이너 안에서도 호스트를 가리키므로 양쪽에서 통합니다.
+```
+NAME                  STATUS                    PORTS
+pawtrail-postgres     Up 40 seconds (healthy)   0.0.0.0:5432->5432/tcp
+pawtrail-kafka        Up 40 seconds (healthy)   0.0.0.0:9092->9092/tcp, 0.0.0.0:29092->29092/tcp
+pawtrail-redis        Up 40 seconds (healthy)   0.0.0.0:6379->6379/tcp
+...
+```
+
+> **`(health: starting)` 은 아직 확인 중이라는 뜻입니다.** 기다립니다.
+
+---
+
+**postgres 가 처음 뜰 때 init 스크립트가 돕니다.**
+
+```
+[init-db] creating auth_db / auth_svc
+[init-db] creating user_db / user_svc
+...
+[init-db] done: 10 databases
+```
+
+```bash
+docker compose logs postgres | grep init-db
+```
+
+<br><br>
+
+---
+
+### 2-4. Kafka 토픽 만들기
+
+**컨테이너 안에서 실행합니다.**
+
+```bash
+docker compose exec kafka bash /opt/scripts/create-topics.sh
+```
+
+**토픽 12개가 만들어집니다.** 스크립트가 멱등이라 **여러 번 실행해도 안전합니다.**
+
+> **자동 생성을 꺼 두었습니다.** 켜 두면 **컨슈머의 토픽명 오타가 조용히 빈 토픽을
+> 만들어 "발행은 되는데 소비만 안 되는" 상태**가 됩니다.
+
+<br><br>
+
+---
+
+### 2-5. 확인
+
+| 주소 | 무엇 |
+|---|---|
+| `http://localhost:8761` | 유레카 대시보드 — 플랫폼이 등록됐는지 |
+| `http://localhost:9000` | Kafka UI — 토픽 12개 |
+| `http://localhost:8888/place-service/local` | 설정이 내려오는지 |
+| `http://localhost:3000` | Grafana (`observability` 를 켰다면) |
+
+<br><br>
+
+---
+
+## 3. 프로파일 — 무엇을 띄울지 고르기
+
+**모든 컨테이너에 `profiles:` 가 붙어 있습니다.** 켠 프로파일에 해당하는 것만 뜹니다.
+
+```
+.env
+  COMPOSE_PROFILES=infra,platform,db,tools
+
+
+docker compose up -d
+        │
+        └──▶  .env 의 조합이 뜸           ✅ 평소에 이렇게 씀
+
+
+docker compose --profile app up -d
+        │
+        └──▶  ⛔ .env 값이 통째로 대체됨
+                활성 프로파일이 app 하나
+                        │
+                        └── auth 의 depends_on 이 가리키는
+                            config-server · postgres 가 프로젝트에 없음
+                              service "auth-service" depends on undefined service
+                              → invalid compose project
+
+
+한 번만 다르게 띄우려면 전부 나열
+  docker compose --profile infra --profile platform --profile db --profile tools --profile app up -d
+```
+
+<br><br>
+
+---
+
+### 3-1. 상황별 조합
+
+| 상황 | `COMPOSE_PROFILES` |
+|---|---|
+| **auth 를 고치는 중** | `infra,platform,db,tools` |
+| **auth 를 컨테이너로 띄움** | `infra,platform,db,tools,app` |
+| 대시보드·추적을 볼 때 | 위 조합 + `,observability` |
+| 수집 배치를 돌릴 때 | 위 조합 + `,pipeline` |
+
+> **`.env` 는 사람마다 다른 파일입니다.** 각자 자기 방식대로 두면 됩니다.
+> auth 를 고치지 않는 팀원은 `app` 을 넣어 두는 편이 편합니다.
+>
+> ⚠ **`app` 을 켤 때는 IntelliJ 의 auth 를 먼저 멈춥니다.** 8081 이 겹칩니다.
+
+<br><br>
+
+---
+
+### 3-2. `down` 도 프로파일을 봅니다
+
+```bash
+docker compose down
+```
+
+**활성 프로파일에 없는 컨테이너는 안 내려갑니다.**
+
+```
+.env 에 db 가 없는데 --profile db 로 postgres 를 띄웠다면
+        │
+        └── docker compose down 이 그것을 대상으로 안 잡음
+              Resource is still in use 로 네트워크 삭제도 실패
+```
+
+**해결**
+
+```bash
+docker compose --profile db down
+# 또는
+docker rm -f pawtrail-postgres
+```
+
+<br><br>
 
 ---
 
 ## 4. 구성 요소
 
-### 4-1. 포트
-
-**인프라**
-
-| 서비스 | 포트 | 비고 |
-|---|---|---|
-| PostgreSQL | 5432 | |
-| Kafka | 9092 | 컨테이너 간 통신용 |
-| Kafka | 29092 | **호스트에서 접속할 때 사용합니다** |
-| Redis | 6379 | |
-| Kafka UI | 9000 | 컨테이너 내부는 8080 |
-| Prometheus | 9090 | |
-| Grafana | 3000 | |
-| Loki | 3100 | |
-| Zipkin | 9411 | |
-
-**플랫폼** — 이 저장소가 띄우지는 않지만 함께 도는 것들입니다.
-
-| 서비스 | 포트 | 비고 |
-|---|---|---|
-| gateway-server | 8080 | 브라우저의 모든 요청이 지나갑니다 |
-| eureka-server | 8761 | 대시보드를 브라우저로 엽니다 |
-| config-server | 8888 | 설정을 내려줍니다 |
-
-**Kafka UI 를 9000 에 둔 이유가 여기 있습니다.** 컨테이너 내부는 8080인데 그것을 그대로 열면 게이트웨이와 부딪힙니다. 도메인 서비스는 8081부터 순서대로 배정하며 전체 표는 `service-template` 저장소의 README에 있습니다.
-
-IntelliJ에서 실행하는 서비스는 Kafka에 **29092** 로 접속해야 합니다.
-
-Kafka 브로커는 접속한 클라이언트에게 "다음부터는 이 주소로 오라"는 응답을 되돌려줍니다. 9092로 접속하면 `kafka:9092` 를 받는데, 이 이름은 도커 네트워크 안에서만 해석되므로 호스트에서 실행 중인 서비스는 그 주소로 다시 연결하지 못합니다. 그래서 호스트용 리스너를 따로 두고 `localhost:29092` 를 되돌려주도록 구성했습니다.
-
-컨트롤러용 리스너(9093)도 있지만 밖으로 열지 않습니다. Kafka 내부 합의에만 쓰이며 클라이언트가 접속하는 대상이 아닙니다.
-
-컨테이너 이름은 `pawtrail-` 접두사로 고정해 두었습니다. 여러 프로젝트를 함께 돌릴 때 구분하기 위해서입니다. 다만 이름을 고정하면 같은 서비스를 여러 개 띄울 수 없으므로, 인스턴스를 늘려야 하는 서비스를 추가할 때는 `container_name` 을 빼야 합니다.
-
-### 4-2. 데이터베이스
-
-평소에는 공용 인스턴스를 사용하지만, 초기화 스크립트는 이 저장소가 관리합니다. 공용 인스턴스를 다시 세울 때도 같은 스크립트를 사용하므로 `db` 프로파일과 `init-db/` 를 함께 두었습니다.
-
-`init-db/01-databases.sh` 가 최초 기동 시 데이터베이스 10개와 전용 계정 10개를 만듭니다.
-
-| 데이터베이스 | 계정 | 소유 서비스 |
-|---|---|---|
-| auth_db | auth_svc | auth |
-| user_db | user_svc | user |
-| pet_db | pet_svc | pet |
-| place_db | place_svc | place |
-| policy_db | policy_svc | policy |
-| search_db | search_svc | search |
-| raw_db | ingest_svc | ingest |
-| report_db | report_svc | report |
-| review_db | review_svc | review |
-| notif_db | notif_svc | notification |
-
-각 데이터베이스는 `REVOKE CONNECT ... FROM PUBLIC` 으로 보호되어 있어 다른 서비스 계정으로는 접속할 수 없습니다. 권한 상태는 다음으로 확인합니다.
-
-```powershell
-docker exec pawtrail-postgres psql -U pawtrail -d postgres -c "\l"
-```
-
-`Access privileges` 열이 아래와 같이 나오면 격리가 적용된 것입니다. `=` 왼쪽이 비어 있는 항목이 PUBLIC이며, 거기에 `c`(CONNECT)가 없어야 합니다.
-
-```
- auth_db | =T/pawtrail            +
-         | pawtrail=CTc/pawtrail  +
-         | auth_svc=CTc/pawtrail
-```
-
-`search_db` 와 `place_db` 에는 PostGIS가, `search_db` 에는 `pg_trgm` 이 설치되어 있습니다. PostGIS는 슈퍼유저 권한이 필요해 서비스 계정의 마이그레이션으로는 만들 수 없으므로 초기화 단계에서 처리합니다.
-
-초기화 스크립트를 `.sql` 이 아니라 `.sh` 로 둔 이유는 비밀번호를 환경 변수로 받기 위해서입니다. `.sql` 은 변수 치환이 되지 않아 값을 파일에 직접 적어야 하는데, 그러면 `.env` 를 고쳐도 계정 비밀번호는 그대로 남아 두 값이 갈립니다. 접속만 실패하고 파일을 눈으로 보면 맞아 보이는 형태가 되므로 원인을 찾기 어렵습니다.
-
-```bash
-CREATE USER ${role} WITH PASSWORD '${SERVICE_DB_PASSWORD}';
-```
-
-`.sh` 파일에 실행 권한을 줄 필요는 없습니다. PostgreSQL 이미지는 `/docker-entrypoint-initdb.d` 의 스크립트에 실행 권한이 있으면 실행하고, 없으면 현재 셸에서 읽어 들입니다. Windows에서 파일 권한이 보존되지 않아도 문제가 되지 않습니다.
-
-### 4-3. Kafka 토픽
-
-| 토픽 | 발행 | 소비 |
-|---|---|---|
-| place.updated | place | search |
-| policy.changed | policy | notification, verdict |
-| pet.profile.updated | pet | verdict |
-| account.created | auth | user |
-| account.withdrawn | auth | user, pet, report, review, notification |
-| report.reviewed | report | notification |
-
-각 토픽에는 `{토픽}.dlq` 가 함께 생성되어 있습니다. 재시도 후에도 처리에 실패한 메시지가 이곳으로 이동합니다.
-
-토픽 자동 생성(`auto.create.topics.enable`)은 꺼 두었고 스크립트로만 만듭니다. 켜 두면 컨슈머의 토픽명 오타가 조용히 빈 토픽을 만들어, 발행은 되는데 소비만 되지 않는 상태가 됩니다. 오류가 나지 않으므로 원인을 찾기 어렵습니다.
-
-토픽 이름에는 `_` 를 쓰지 않습니다. Kafka가 JMX 메트릭 이름에서 `.` 과 `_` 를 같게 취급하므로 두 표기가 섞이면 메트릭이 충돌합니다.
-
-### 4-4. 관측 스택
-
-Prometheus는 `prometheus/prometheus.yml` 의 타깃을 수집합니다. 서비스 타깃이 `host.docker.internal` 로 되어 있는 이유는 서비스가 IntelliJ에서 실행되기 때문입니다. Prometheus 컨테이너 입장에서 `localhost` 는 자기 자신이므로 그 주소로는 서비스를 찾지 못합니다.
-
-서비스를 추가하면 `scrape_configs` 의 `static_configs` 에 블록을 하나 더 넣습니다. 타깃마다 `labels` 를 붙여 두었으므로 Grafana에서 `application` 으로 서비스를 구분할 수 있습니다. 주소만 나열하면 어느 메트릭이 어느 서비스 것인지 구분되지 않습니다.
-
-```yaml
-  - job_name: spring-services
-    metrics_path: /actuator/prometheus
-    static_configs:
-      - targets:
-          - "host.docker.internal:8080"
-        labels:
-          application: gateway-server
-
-      - targets:                              # 이렇게 블록째 추가합니다
-          - "host.docker.internal:8084"
-        labels:
-          application: place-service
-```
-
-지금 등록된 것은 플랫폼 3개(8080 · 8761 · 8888)와 템플릿 실행용(8095)입니다. 도메인 서비스를 만들면 그때 추가합니다.
-
-`metrics_path` 를 바꾸는 것을 잊지 않습니다. 기본값은 `/metrics` 인데 액추에이터의 경로는 `/actuator/prometheus` 라서, 그대로 두면 404만 받고 **오류 없이 아무것도 수집되지 않습니다.**
-
-Grafana 데이터소스 3개는 `grafana/provisioning/datasources/datasources.yml` 로 자동 등록됩니다. 컨테이너를 다시 만들어도 같은 상태로 뜹니다.
-
-Loki에는 애플리케이션이 직접 로그를 보냅니다. 공통 모듈의 logback appender가 그 역할을 하며, 인프라 쪽에는 수집 에이전트가 없습니다.
-
-도커 로그 드라이버나 별도 수집 에이전트를 두지 않은 이유는 도메인 서비스가 IntelliJ에서 실행되기 때문입니다. 둘 다 컨테이너의 출력을 모으는 방식이라 컨테이너 밖에서 도는 프로세스의 로그는 잡지 못합니다. 애플리케이션이 직접 보내면 실행 위치와 무관하게 같은 경로로 동작합니다.
+<br><br>
 
 ---
 
-### 4-5. 데이터 보존
+### 4-1. 포트
 
-볼륨을 잡아 둔 것은 PostgreSQL뿐입니다. Kafka, Redis, Loki, Zipkin, Grafana는 컨테이너를 다시 만들면 내용이 사라집니다.
+```
+8080  gateway-server     *모든 API 요청의 입구
+8081  auth-service        직접 확인할 때만
+8761  eureka-server       대시보드
+8888  config-server       설정
+9000  kafka-ui            *8080 이 아님 (게이트웨이와 겹침)
+9090  prometheus
+3000  grafana
+3100  loki
+9411  zipkin
+5432  postgres
+6379  redis
+9092  kafka               컨테이너끼리
+29092 kafka               *호스트에서 붙을 때
+```
 
-로컬에서 지난 메시지나 트레이스를 다시 볼 일이 없고, 검증할 때는 오히려 깨끗한 상태로 시작하는 편이 낫기 때문입니다. Kafka의 경우 이미지가 비루트 사용자로 동작해 빈 볼륨을 마운트하면 디렉터리가 root 소유로 만들어져 브로커가 기동에 실패한다는 문제도 있습니다.
+---
 
-대신 **Compose를 다시 실행해 Kafka 컨테이너가 새로 만들어지면 토픽이 사라집니다.** 토픽 생성 스크립트는 여러 번 실행해도 안전하므로 다시 돌리면 됩니다(7절 참고).
+**Kafka 포트가 둘인 이유입니다.**
+
+```
+컨테이너 안에서   kafka:9092          같은 도커 네트워크
+호스트에서       localhost:29092      IntelliJ 로 띄운 서비스
+```
+
+**한 브로커인데 리스너가 둘입니다.** config 의 `application-local.yml` 은 29092 를,
+`application-dev.yml` 은 9092 를 씁니다.
+
+---
+
+**도메인 서비스 포트 배정입니다.**
+
+| 포트 | 서비스 |
+|---|---|
+| 8081 | auth |
+| 8082 | user |
+| 8083 | pet |
+| 8084 | place |
+| 8085 | policy |
+| 8086 | verdict |
+| 8087 | search |
+| 8088 | ingest |
+| 8089 | extract |
+| 8090 | report |
+| 8091 | review |
+| 8092 | notification |
+| 8093 | congestion |
+| 8094 | route |
+| 8095 | template (검증용) |
+
+<br><br>
+
+---
+
+### 4-2. 데이터베이스 10개
+
+```
+postgres 컨테이너 하나
+│
+├── auth_db      auth_svc          user_db    user_svc
+├── pet_db       pet_svc           place_db   place_svc
+├── policy_db    policy_svc        search_db  search_svc
+├── raw_db       ingest_svc        report_db  report_svc
+└── review_db    review_svc        notif_db   notif_svc
+```
+
+**계정이 자기 DB 에만 붙을 수 있습니다.**
+
+```sql
+REVOKE CONNECT ON DATABASE ${db} FROM PUBLIC;
+GRANT ALL PRIVILEGES ON DATABASE ${db} TO ${role};
+```
+
+```
+PostgreSQL 은 기본적으로 PUBLIC 에 CONNECT 를 줌
+        │
+        └── 이 줄이 없으면 auth_svc 가 place_db 에 그냥 접속됨
+              *Database per Service 를 문서가 아니라 권한으로 강제하는 자리
+```
+
+**확인**
+
+```bash
+docker compose exec postgres psql -U pawtrail -c "\l"
+```
+
+---
+
+**DB 가 없는 서비스도 있습니다.**
+
+```
+verdict · congestion · route     무상태
+extract                          raw_db 를 읽고 policy 에 넘김 (자기 DB 없음)
+```
+
+---
+
+**PostGIS 와 pg_trgm 이 깔립니다.**
+
+| 확장 | 왜 |
+|---|---|
+| `postgis` | 좌표 · 거리 검색 (place · search · route) |
+| `pg_trgm` | 오타·부분일치 검색 |
+
+> **PostGIS 는 신뢰 확장이 아니라 `CREATE EXTENSION` 에 슈퍼유저가 필요합니다.**
+> 그래서 init 스크립트가 만듭니다.
+
+<br><br>
+
+---
+
+### 4-3. Kafka 토픽 12개
+
+```
+도메인 이벤트 6개 + 각각의 .dlq
+
+place.updated          place    ──▶  search
+policy.changed         policy   ──▶  search · notification
+pet.profile.updated    pet      ──▶  verdict
+account.created        auth     ──▶  user
+account.withdrawn      auth     ──▶  user · pet · report · review · notification
+report.reviewed        report   ──▶  notification
+```
+
+---
+
+**`.dlq` 는 재시도가 끝난 메시지가 가는 곳입니다.**
+
+```
+컨슈머가 실패
+        │
+        └── 1초 → 2초 → 4초 로 3회 재시도
+                    │
+                    └── 그래도 실패하면 {원본토픽}.dlq 로 보내고 넘어감
+                          *그 메시지 하나 때문에 뒤가 막히지 않게
+```
+
+**DLQ 조회 API 를 만들지 않았습니다.** Kafka UI(9000)로 봅니다.
+
+---
+
+**토픽 자동 생성을 껐습니다.**
+
+```
+켜 두면
+        │
+        └── 컨슈머의 토픽명 오타가 조용히 빈 토픽을 만듦
+              발행은 되는데 소비만 안 되는 상태
+```
+
+<br><br>
+
+---
+
+### 4-4. 관측 스택
+
+```
+서비스  ──▶  Loki 3100         로그
+       ──▶  Zipkin 9411       추적 (요청 하나가 서비스 몇 개를 지났나)
+       ◀──  Prometheus 9090   지표 (긁어 감)
+                    │
+                    ▼
+              Grafana 3000    셋을 한 화면에
+```
+
+**Grafana 데이터소스는 자동 등록됩니다.**
+
+```
+grafana/provisioning/datasources/datasources.yml
+        │
+        └── Prometheus · Loki · Zipkin 셋이 기동할 때 붙음
+              * Connections 메뉴에서 손으로 추가할 필요 없음
+```
+
+---
+
+**Prometheus 타깃을 추가할 때입니다.**
+
+```yaml
+# prometheus/prometheus.yml
+- targets: ["host.docker.internal:8084"]
+  labels:
+    application: place-service        # *블록째 추가
+```
+
+> ⚠ **`metrics_path` 를 빠뜨리면 조용히 아무것도 안 모입니다.**
+> 기존 블록을 복사해 값만 바꾸는 편이 안전합니다.
+>
+> **추적은 게이트웨이에서 시작됩니다.** 서비스를 8084 로 직접 부르면
+> Zipkin 에서 전체 경로를 못 봅니다.
+
+<br><br>
+
+---
+
+### 4-5. 데이터가 남는 것과 안 남는 것
+
+| | 볼륨 | `down` 하면 |
+|---|---|---|
+| **postgres** | `postgres_data` | **남습니다** |
+| kafka | 없음 | **사라집니다** |
+| redis | 없음 | 사라집니다 |
+| prometheus · loki · grafana | 없음 | 사라집니다 |
+
+```
+Kafka 는 일부러 볼륨을 안 잡음
+        │
+        └── apache/kafka 이미지가 비루트로 도는데
+              이미지에 없는 경로에 빈 볼륨을 마운트하면
+              그 디렉터리가 root 소유로 생겨 브로커가 못 씀
+                    │
+                    └── 토픽 생성 스크립트가 멱등이라 재실행 한 번이면 복구됨
+```
+
+---
+
+**DB 를 완전히 비우려면**
+
+```bash
+docker compose --profile db down -v
+docker compose up -d
+```
+
+**`-v` 가 볼륨을 지웁니다.** 그러면 init 스크립트가 다시 돌아 **DB 10개가 새로
+만들어집니다.**
+
+<br><br>
 
 ---
 
 ## 5. 자주 쓰는 명령
 
-```powershell
-# 기동 및 중지
+```bash
+# 기동 · 중지
 docker compose up -d
-docker compose stop
-docker compose down
+docker compose down                    # 볼륨은 남음
+docker compose --profile db down -v    # ⚠DB 까지 지움
 
-# 상태 확인
+# 상태
 docker compose ps
-docker compose logs -f kafka
+docker compose logs -f auth-service
+docker compose logs postgres | grep init-db
 
-# 토픽 재생성 (멱등하므로 여러 번 실행해도 안전합니다)
+# 이미지 갱신 — up -d 만으로는 안 받음
+docker compose pull auth-service
+docker compose up -d
+
+# 토픽 재생성 (멱등)
 docker compose exec kafka bash /opt/scripts/create-topics.sh
 
-# 로컬 데이터베이스가 필요할 때
-docker compose --profile db up -d
-docker exec -it pawtrail-postgres psql -U pawtrail -d raw_db
+# DB 접속
+docker compose exec postgres psql -U auth_svc -d auth_db -P pager=off
 
-# 로컬 데이터베이스 내리기
-docker compose --profile db down
+# Redis
+docker compose exec redis redis-cli KEYS '*'
 ```
 
-`db` 프로파일로 띄운 컨테이너는 `docker compose down` 만으로는 내려가지 않습니다. 활성 프로파일에 포함되지 않아 Compose가 대상으로 잡지 않기 때문이며, `--profile db` 를 함께 지정하거나 `docker rm -f pawtrail-postgres` 로 직접 제거합니다.
+> **`-P pager=off`** 가 없으면 결과가 넓을 때 **멈춘 것처럼 보입니다.**
+>
+> **`docker compose restart <서비스>`** 는 컨테이너만 다시 시작합니다.
+> **이미지를 바꾸려면 `pull` + `up -d`** 입니다.
 
-데이터를 포함해 완전히 초기화하려면 볼륨까지 지웁니다. 로컬 데이터베이스의 내용이 전부 사라집니다.
-
-```powershell
-docker compose --profile db down -v
-```
-
-`docker compose` 명령은 `docker-compose.yml` 이 있는 디렉터리에서만 동작합니다. 다른 저장소 폴더에서 컨테이너를 다루려면 `docker exec pawtrail-postgres ...` 처럼 컨테이너 이름을 직접 사용합니다.
+<br><br>
 
 ---
 
-## 6. 플랫폼 이미지 만들기
+## 6. 서비스를 붙일 때
 
-`platform` 프로파일은 `image:` 로 ghcr의 이미지를 받아 옵니다. Jenkins가 생기기 전까지는 손으로 만들어 올립니다.
+**IntelliJ 로 서비스를 띄우려면 세 가지가 필요합니다.**
 
-### 6-1. 처음 한 번
-
-컨테이너 저장소에 로그인합니다. 자격 증명은 Docker Desktop이 기억하므로 **기기당 한 번**만 하면 됩니다.
-
-```powershell
-docker login ghcr.io -u <GitHub 아이디>
+```
+① 컨테이너가 떠 있음                 docker compose up -d
+        │
+② IntelliJ 실행 구성에 환경변수
+        │
+③ config 저장소에 그 서비스 파일       <서비스명>.yml
+        │
+        ▼
+   기동
+        │
+        └──▶  *게이트웨이로 부르려면 라우트도 열어야 함
+                안 열면 서비스는 정상인데 404
 ```
 
-- **사용자명은 GitHub 아이디입니다.** 윈도우 계정명이 아닙니다
-- **비밀번호 자리에는 개인 접근 토큰을 넣습니다.** 계정 비밀번호는 받지 않습니다. 화면에 아무것도 안 보이는 것이 정상입니다
-- 토큰은 `write:packages` 권한이 있어야 합니다. 공통 모듈을 올릴 때 쓰던 토큰이 있다면 **그것을 그대로 쓸 수 있습니다.** 그 권한 하나가 Maven과 컨테이너 이미지를 모두 덮습니다
+<br><br>
 
-환경 변수에 토큰이 이미 있다면 프롬프트 없이 넘길 수도 있습니다.
+---
 
-```powershell
-$env:GPR_TOKEN | docker login ghcr.io -u $env:GPR_USER --password-stdin
+### 6-1. IntelliJ 실행 구성에 넣는 환경변수
+
+```
+Run → Edit Configurations → Environment variables
 ```
 
-### 6-2. 이미지를 만들어 올리기
+| 이름 | 값 | 누가 |
+|---|---|---|
+| `DB_HOST` | `localhost` | DB 를 쓰는 서비스 |
+| `SERVICE_DB_PASSWORD` | `.env` 와 같은 값 | 같음 |
+| `AUTH_JWT_PRIVATE_KEY_B64` | 팀장에게 받음 | auth 만 |
+| `AUTH_MAIL_PASSWORD` | 팀장에게 받음 | auth 만 |
+| `AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | 팀장에게 받음 | auth 만 |
 
-해당 저장소에서 실행합니다. 예는 설정 서버입니다.
+```
+DB_HOST=localhost;SERVICE_DB_PASSWORD=...
+```
+
+> ⚠ **`.env` 는 Docker Compose 가 읽는 파일이라 IntelliJ 와 무관합니다.**
+> 같은 값을 두 곳에 넣게 되는데, 한 곳만 관리하고 싶으면 **OS 환경변수**에 둡니다.
+> 대신 터미널·IntelliJ 재시작이 필요합니다.
+
+---
+
+**`DB_HOST` 가 컨테이너와 다릅니다.**
+
+```
+IntelliJ (호스트에서 돎)     localhost:5432
+컨테이너 (도커 안에서 돎)     postgres:5432
+        │
+        └── *같은 postgres 컨테이너인데 부르는 이름만 다름
+              컨테이너 안에서 localhost 는 자기 자신이라 DB 가 없음
+```
+
+**컨테이너 쪽은 compose 에 박혀 있어 아무도 안 건드려도 됩니다.**
+
+---
+
+**빠뜨렸을 때 나오는 오류입니다.**
+
+| 빠진 것 | 증상 |
+|---|---|
+| `DB_HOST` | `UnknownHostException: ${DB_HOST}` — **치환이 안 돼 문자열 그대로 들어감** |
+| `SERVICE_DB_PASSWORD` | `password authentication failed for user "auth_svc"` |
+| | **계정이 없으면 `role does not exist`** 이므로 이 메시지는 비밀번호 문제 |
+
+> **빌드는 환경변수 없이도 통과합니다.** Testcontainers 가 자기 DB 를 띄우기 때문에
+> **실제로 띄울 때가 되어서야 드러납니다.**
+
+<br><br>
+
+---
+
+### 6-2. 게이트웨이를 거쳐 호출하기
+
+**세 가지가 다 되어야 합니다.**
+
+```
+① 서비스가 유레카에 등록됐나          localhost:8761 에 보이는지
+② config 에 <서비스명>.yml 이 있나     포트가 8080 으로 뜨면 없는 것
+③ *게이트웨이 라우트가 열려 있나       ← 제일 빠지기 쉬움
+```
+
+**③을 빠뜨리면 서비스는 정상인데 404 입니다.**
+
+```bash
+curl http://localhost:8080/actuator/gateway/routes
+```
+
+**여는 법은 `config` README 5-2 에 있습니다.**
+
+---
+
+**IntelliJ 로 띄운 서비스도 게이트웨이가 찾아냅니다.**
+
+```
+local 프로파일   →  host.docker.internal 로 유레카에 등록
+                          │
+                          └── 그 이름이 컨테이너 안에서도 호스트를 가리킴
+                                게이트웨이가 IntelliJ 서비스를 호출할 수 있음
+```
+
+<br><br>
+
+---
+
+### 6-3. 로컬 DB 를 쓰는 이유
+
+**EC2 PostgreSQL 을 아직 세우지 않았습니다.**
+
+```
+auth · user · pet 은 공유할 데이터가 없음
+        │
+        └── 오히려 공유하면 서로의 테스트 계정이 섞여 성가심
+
+EC2 가 필요해지는 것은 ingest 착수 시점
+        │
+        └── 수집 데이터 4,600건을 공유해야 하고
+              공공 API 쿼터가 하루 1,000건이라 각자 채울 수 없음
+```
+
+> ⚠ **DB 를 공유하면 위험합니다.** 한쪽이 Flyway 스크립트를 추가하면
+> **공유 DB 에 즉시 적용되어 다른 쪽 스키마가 모르는 사이에 바뀝니다.**
+
+<br><br>
+
+---
+
+## 7. 이미지 만들어 올리기
+
+**플랫폼·도메인 서비스의 코드를 고쳤을 때만 합니다.**
+
+```
+① 서비스 저장소에서 빌드
+        ./gradlew clean build
+        │
+        ▼
+② ghcr 로그인                기기당 한 번
+        │
+        ▼
+③ docker build · push
+        │
+        ▼
+④ 팀원은  docker compose pull <서비스> && docker compose up -d
+```
+
+<br><br>
+
+---
+
+### 7-1. 처음 한 번
 
 ```powershell
-cd ..\config-server
+$env:GPR_TOKEN | docker login ghcr.io -u <GitHub 아이디> --password-stdin
+```
+
+| 걸리는 것 | 증상 |
+|---|---|
+| 윈도우 계정명을 씀 | `denied: denied` — **GitHub 아이디여야 함** |
+| 토큰에 `write:packages` 가 없음 | 같음 |
+
+> **자격증명은 Docker Desktop 이 기억하므로 기기당 한 번입니다.**
+>
+> **조직명이 `pawtrail` 이 아니라 `paw-trail`** 입니다. 자바 패키지와 갈려 있습니다.
+
+<br><br>
+
+---
+
+### 7-2. 굽고 올리기
+
+```powershell
+cd C:\Tour_Prj\<서비스>
 .\gradlew clean build
-docker build -t ghcr.io/paw-trail/config-server:latest .
-docker push ghcr.io/paw-trail/config-server:latest
+
+docker build -t ghcr.io/paw-trail/<서비스>:latest .
+docker push ghcr.io/paw-trail/<서비스>:latest
 ```
 
-**조직명이 `paw-trail` 입니다.** 자바 패키지(`com.pawtrail`)와 철자가 다르므로 주의합니다. 틀리면 올릴 때 권한 오류가 납니다.
-
-이미지 이름은 저장소 이름을 그대로 씁니다.
-
-```
-ghcr.io / paw-trail / <저장소명> : latest
-```
-
-### 6-3. 처음 올린 뒤에 할 것
-
-**컨테이너 이미지는 기본이 비공개입니다.** 그대로 두면 다른 팀원이 받을 수 없어 `--profile platform up` 이 동작하지 않습니다.
-
-```
-조직 Packages → 해당 패키지 → Package settings
-  → Danger Zone → Change package visibility → Public
-```
-
-**공개 선택지가 회색으로 막혀 있다면** 조직 설정에서 먼저 허용해야 합니다. 실수로 내부 이미지를 공개하는 것을 막으려는 기본값입니다.
-
-```
-조직 Settings → Packages → Public 허용
-```
-
-공통 모듈은 이 절차가 필요 없었습니다. **Maven 패키지는 저장소의 공개 여부를 따라가고, 컨테이너 이미지만 이 정책을 따로 받습니다.**
-
-### 6-4. 코드를 고친 뒤
-
-`build → docker build → push` 를 다시 하고 컨테이너를 새로 만듭니다.
+**확인**
 
 ```powershell
-docker compose --profile platform pull
-docker compose --profile platform up -d
+docker run --rm --entrypoint sh ghcr.io/paw-trail/<서비스>:latest -c "ls -lh /app"
 ```
 
-**다만 대부분은 이미지를 다시 만들 필요가 없습니다.** 포트·주소·라우팅 규칙 같은 설정은 전부 `config` 저장소에 있어, 그쪽을 고치고 서비스를 다시 읽게 하면 됩니다.
+`app.jar` 가 수십 MB 면 정상입니다. **몇 KB 면 `-plain.jar` 가 담긴 것**인데
+`build.gradle` 에 `tasks.named('jar') { enabled = false }` 가 있어 지금은 안 생깁니다.
 
-```powershell
-curl.exe -X POST http://localhost:8080/actuator/refresh
-```
+> ⚠ **`docker run <이미지> ls` 는 동작하지 않습니다.** `ENTRYPOINT` 가 있으면
+> 뒤 명령이 인자로 붙습니다. `--entrypoint sh` 가 필요합니다.
 
-이미지를 다시 만들어야 하는 것은 **코드와 의존성이 바뀐 경우**뿐입니다.
+<br><br>
 
 ---
 
-## 7. 서비스를 연결할 때
+### 7-3. 처음 올린 뒤 공개로 바꿉니다
 
-**접속 주소는 서비스 저장소가 아니라 `paw-trail/config` 저장소에 있습니다.** 각 서비스의 `application.yml` 에는 세 줄만 있고, 나머지는 설정 서버가 내려줍니다. 아래는 그중 이 저장소와 관련된 값들이며, 어디에 적혀 있는지를 함께 표시했습니다.
-
-```
-config/application-local.yml    app.datasource.host              ${DB_HOST}
-                                spring.kafka.bootstrap-servers   localhost:29092
-                                spring.data.redis.host           localhost
-
-config/<서비스명>.yml            spring.datasource.url            jdbc:postgresql://${app.datasource.host}:5432/<서비스>_db
-                                spring.datasource.username       <서비스>_svc
-
-config/application.yml          spring.datasource.password       ${SERVICE_DB_PASSWORD}
-```
-
-데이터베이스 주소를 한 곳에만 적는 이유는, 장애로 데이터베이스를 승격했을 때 **`app.datasource.host` 한 줄만 고치면 모든 서비스가 따라오기 때문**입니다. 서비스마다 전체 주소를 적어 두면 열네 곳을 고쳐야 합니다.
-
-Kafka는 반드시 **29092** 를 사용합니다. 9092는 컨테이너끼리 쓰는 주소입니다.
-
-### IntelliJ 실행 구성에 넣는 환경 변수
-
-**빌드는 이 값들이 없어도 통과합니다.** 테스트가 자기 PostgreSQL 컨테이너를 직접 띄우기 때문입니다. 실행 버튼을 누르는 순간부터 필요해집니다.
+**컨테이너 이미지는 기본이 비공개라 팀원이 못 받습니다.**
 
 ```
-DB_HOST                 공용 인스턴스 주소, 또는 로컬을 쓸 때는 localhost
-SERVICE_DB_PASSWORD     .env 에 넣은 값과 같은 값
+GitHub 조직 → Packages → 해당 패키지 → Package settings
+        │
+        └── Change visibility → Public
 ```
 
-서비스에 따라 더 필요할 수 있습니다. 인증 서비스는 토큰 서명에 쓰는 개인키를 `AUTH_JWT_PRIVATE_KEY_B64` 로 받습니다. **자기 서비스의 config 파일에서 `${...}` 로 적힌 것을 찾으면 그것이 목록입니다.**
+> ⚠ **회색으로 막혀 있으면** 조직 정책입니다.
+> **조직 Settings → Packages 에서 `Public` 을 허용**하면 풀립니다.
+>
+> **Maven 패키지(공통 모듈)는 레포 공개 여부를 따라가고 컨테이너 이미지만
+> 이 정책을 따로 받습니다.**
 
-**`SERVICE_DB_PASSWORD` 는 이 저장소의 `.env` 에 넣은 값과 같아야 합니다.** 계정을 만들 때 쓰는 값과 접속할 때 쓰는 값이 같은 것이므로 이름도 같게 두었습니다.
-
-`.env` 는 Docker Compose 가 읽는 파일이므로, IntelliJ 로 띄우는 서비스에는 실행 구성의 Environment variables 칸에 직접 넣어야 합니다.
-
-```
-Run/Debug Configurations → 해당 실행 구성 → Environment variables
-```
-
-칸이 안 보이면 `Modify options` 에서 `Environment variables` 를 켭니다.
-
-같은 값을 두 곳에 두는 것이 번거로우면 OS 환경 변수에 넣습니다. IntelliJ 는 그것을 물려받고 Compose 도 `.env` 에 없으면 호스트 환경 변수를 찾습니다.
-
-```powershell
-[Environment]::SetEnvironmentVariable("DB_HOST", "localhost", "User")
-```
-
-**IntelliJ 를 다시 시작해야 반영됩니다.**
-
-#### 빠뜨렸을 때 나오는 오류
-
-메시지가 원인을 알려주지 않으므로 형태를 외워 두는 편이 빠릅니다.
-
-```
-java.net.UnknownHostException: ${DB_HOST}
-```
-
-치환되지 않은 문자열이 그대로 주소로 쓰인 것입니다. **그 변수가 없다는 뜻입니다.**
-
-```
-FATAL: password authentication failed for user "auth_svc"
-```
-
-**계정은 있고 비밀번호만 안 맞는 것입니다.** 계정 자체가 없으면 `role does not exist` 가 나오므로, 이 메시지가 보이면 초기화 스크립트는 정상이고 `SERVICE_DB_PASSWORD` 만 확인하면 됩니다.
-
-공용 인스턴스에 접속하려면 본인의 공인 IP가 보안그룹에 등록되어 있어야 합니다. 회선이 바뀌거나 공인 IP가 갱신되면 다시 등록해야 하므로, 접속이 갑자기 되지 않을 때 이 부분을 먼저 확인합니다.
-
-### 로컬 데이터베이스를 쓰는 경우
-
-공용 인스턴스를 건드리지 않고 실험하거나, 마이그레이션을 처음부터 적용해 보고 싶을 때는 로컬 인스턴스를 띄웁니다.
-
-```powershell
-docker compose --profile db up -d
-docker compose exec kafka bash /opt/scripts/create-topics.sh   # 필요한 경우
-```
-
-이때는 `DB_HOST` 만 바꾸면 됩니다. 설정 파일을 고칠 필요 없이 실행 구성의 환경 변수로 덮어씁니다.
-
-```
-DB_HOST                    localhost
-```
-
-**작업이 끝나면 로컬 인스턴스를 내립니다.** 두 인스턴스가 함께 떠 있으면 어느 쪽에 연결되었는지 헷갈립니다.
-
-### 게이트웨이를 거쳐 호출하기
-
-서비스를 IntelliJ에서 직접 부르면 포트로 접속하지만(`localhost:8084`), 실제 요청은 게이트웨이를 지납니다. **그 경로로 확인해야 인증과 라우팅까지 함께 검증됩니다.**
-
-```
-직접 호출    localhost:8084/api/v1/places/{id}     인증 헤더가 없는 상태
-게이트웨이   localhost:8080/api/v1/places/{id}     토큰을 확인하고 헤더를 넣어 줌
-```
-
-게이트웨이를 거치려면 세 가지가 필요합니다.
-
-1. `config-server`, `eureka-server`, `gateway-server` 가 떠 있을 것
-2. 내 서비스가 유레카에 등록되어 있을 것 — `http://localhost:8761` 에서 확인합니다
-3. **`config` 저장소의 `gateway-server.yml` 에 내 서비스의 라우트가 있을 것**
-
-3번이 가장 빠지기 쉽습니다. 라우트가 없으면 게이트웨이가 404를 돌려주는데, 서비스는 정상으로 떠 있어 원인을 찾기 어렵습니다. 지금 열려 있는 목록은 아래로 확인합니다.
-
-```powershell
-curl.exe http://localhost:8080/actuator/gateway/routes
-```
-
-인증이 필요한 경로를 토큰 없이 부르면 401이 돌아옵니다. 정상 동작이며, 응답 형태는 도메인 서비스와 같습니다.
-
-```json
-{"code":"AUTHENTICATION_FAILED","message":"인증에 실패하였습니다.","data":null,"traceId":"..."}
-```
-
-### 관측 스택 연결
-
-로그를 Loki로 보내려면 `SPRING_PROFILES_ACTIVE=dev` 를 실행 구성의 환경 변수에 추가합니다. 지정하지 않으면 `local` 로 동작하며 로그는 콘솔에만 출력됩니다.
-
-메트릭과 추적은 프로파일과 무관하게 항상 전송됩니다. Prometheus는 서비스의 `/actuator/prometheus` 를 직접 수집하고, 추적은 애플리케이션이 Zipkin으로 보냅니다.
-
-**추적은 게이트웨이에서 시작됩니다.** 브라우저에서 온 요청이 처음 닿는 곳이라 그곳에서 식별자가 만들어지고, 뒤쪽 서비스들이 그것을 이어받습니다. 게이트웨이를 거치지 않고 서비스를 직접 부르면 그 서비스가 시작점이 되므로, Zipkin에서 요청 전체의 경로를 보려면 게이트웨이를 거쳐 호출합니다.
+<br><br>
 
 ---
 
-## 8. 트러블슈팅
+### 7-4. 레이어는 재사용됩니다
 
-### `docker compose config` 결과가 `services: {}` 입니다
-
-정상 동작입니다. 모든 서비스에 프로파일 라벨이 붙어 있는데 활성 프로파일이 하나도 없으면 매칭되는 서비스가 없습니다.
-
-`.env` 파일이 있는지, `COMPOSE_PROFILES` 값이 채워져 있는지 확인합니다. `"POSTGRES_USER" variable is not set` 경고가 함께 나온다면 `.env` 가 없는 것입니다.
-
-### 애플리케이션 로그에 `UNKNOWN_TOPIC_OR_PARTITION` 이 반복됩니다
-
-`docker compose up -d` 로 Kafka 컨테이너가 다시 만들어지면서 토픽이 사라진 상태입니다. 다른 서비스를 추가하려고 명령을 다시 실행한 것만으로도 발생합니다.
-
-토픽 생성 스크립트를 다시 실행하면 해결됩니다. 애플리케이션을 재시작할 필요는 없습니다. 컨슈머가 메타데이터를 계속 조회하고 있어 토픽이 생기는 즉시 연결됩니다.
-
-```powershell
-docker compose exec kafka bash /opt/scripts/create-topics.sh
+```
+5174317795d5: Pushed
+44136fa355b3: Mounted from paw-trail/gateway-server
+3c7ed5940eeb: Mounted from paw-trail/gateway-server
+...
 ```
 
-이 메시지는 `ERROR` 가 아니라 `WARN` 으로 출력되므로 놓치기 쉽습니다.
+**베이스 이미지가 같아 실제로 올라가는 것은 우리 jar 하나뿐입니다.**
 
-### PostgreSQL이 뜨지 않습니다
+<br><br>
 
-`db` 프로파일에 있으므로 `docker compose up -d` 만으로는 뜨지 않습니다. 의도된 동작이며, 평소에는 공용 인스턴스를 사용합니다.
+---
 
-로컬 인스턴스가 필요하다면 프로파일을 지정합니다.
+## 8. 막히기 쉬운 자리
+
+<br><br>
+
+---
+
+### 8-1. 컨테이너가 안 뜰 때
+
+| 증상 | 원인 |
+|---|---|
+| `docker compose config` 가 `services: {}` | **`COMPOSE_PROFILES` 가 비었거나 오타** |
+| `depends on undefined service` | **`--profile` 이 `.env` 를 대체함.** [3장](#3-프로파일--무엇을-띄울지-고르기) |
+| `variable is not set` 경고 | `.env` 에 그 값이 없음 |
+| `network ... not found` | 이전 `down` 이 덜 끝남 → `docker compose down` 후 다시 |
+| `up -d` 가 `Starting` 에서 멈춤 | Docker Desktop 이 먹통 — 아래 |
+| `ports are not available ... forbidden` | **윈도우 예약 포트** — 아래 |
+
+---
+
+**Docker Desktop 이 먹통일 때 (Windows)**
 
 ```powershell
-docker compose --profile db up -d
+# 1. Ctrl+C 로 중단
+# 2. WSL 을 내림
+wsl --shutdown
+# 3. 그래도 멈춰 있으면
+Get-Process "*docker*" | Stop-Process -Force
+# 4. Docker Desktop 다시 실행
 ```
 
-### 데이터베이스가 만들어지지 않았습니다
+---
 
-`init-db/` 의 스크립트는 데이터 디렉터리가 비어 있을 때만 실행됩니다. 볼륨이 남아 있으면 스크립트를 고쳐도 반영되지 않습니다.
+**윈도우 예약 포트 (Windows)**
+
+```
+Hyper-V 가 동적 포트 범위를 잡아 두면 그 안의 포트를 못 씀
+```
 
 ```powershell
+# 확인
+netsh int ipv4 show excludedportrange protocol=tcp
+
+# 범위를 위로 옮김 (관리자 권한, 재부팅 필요)
+netsh int ipv4 set dynamicport tcp start=49152 num=16384
+```
+
+<br><br>
+
+---
+
+### 8-2. PostgreSQL
+
+| 증상 | 원인 |
+|---|---|
+| DB 가 안 만들어짐 | **볼륨이 이미 있음.** init 은 **처음 한 번만** 돎 → `down -v` 후 다시 |
+| `role does not exist` | 계정이 없음 — 위와 같음 |
+| `password authentication failed` | **계정은 있고 비밀번호만 다름.** `SERVICE_DB_PASSWORD` 확인 |
+| 비밀번호를 바꿨는데 안 먹음 | 같음. **DB 를 다시 만들어야 함** |
+| Flyway `Detected applied migration not resolved locally` | **볼륨에 옛 이력이 남음** → `down -v` |
+
+```bash
 docker compose --profile db down -v
-docker compose --profile db up -d
-```
-
-`-v` 는 로컬 PostgreSQL 데이터를 전부 삭제합니다. 공용 인스턴스에는 영향이 없습니다.
-
-### Flyway가 `Detected applied migration not resolved locally` 로 실패합니다
-
-데이터베이스 이력에는 마이그레이션이 적용되어 있는데 클래스패스에서 해당 스크립트를 찾지 못한 상태입니다. 공통 모듈 jar가 의존성에서 빠졌을 때 발생합니다.
-
-애플리케이션 로그에 `Found 0 JPA repository interfaces` 가 함께 나오면 같은 원인입니다. 정상이라면 2개가 잡힙니다.
-
-```powershell
-./gradlew dependencies --configuration runtimeClasspath | findstr pawtrail
-```
-
-공통 모듈이 나오지 않으면 `GPR_USER` 와 `GPR_TOKEN` 환경 변수를 확인하고 IntelliJ의 Gradle 창에서 새로고침합니다.
-
-### Kafka UI에서 오프셋을 리셋할 수 없습니다
-
-`Group's offsets can be reset only if group is inactive` 메시지가 나오면 컨슈머가 아직 연결되어 있는 상태입니다.
-
-애플리케이션을 중지하고 세션 타임아웃(기본 45초)이 지날 때까지 기다립니다. Consumers 화면에서 해당 그룹이 `EMPTY` 로 바뀌면 리셋할 수 있습니다.
-
-### Grafana 좌측에 Connections 메뉴가 없습니다
-
-로그인하지 않은 상태입니다. 익명 열람이 켜져 있으나 Viewer 권한이므로 데이터소스 메뉴가 보이지 않습니다.
-
-우측 상단 `Sign in` 을 눌러 `.env` 의 `GRAFANA_USER` 와 `GRAFANA_PASSWORD` 로 로그인합니다.
-
-### `docker compose up -d` 가 Starting 에서 멈춰 있습니다
-
-`docker compose ps` 가 빈 목록을 반환하고 `docker ps -a` 로는 컨테이너가 `Created` 상태로 보인다면 Docker Desktop의 WSL 통합 실패입니다. `docker rm -f` 나 `stop` 도 응답하지 않습니다.
-
-조회 명령은 동작하는데 상태를 바꾸는 명령만 멈추는 것이 이 문제의 특징입니다.
-
-해결 순서는 다음과 같습니다.
-
-```powershell
-# 1. 실행 중인 명령을 Ctrl+C 로 중단합니다
-# 2. WSL 을 내립니다
-wsl --shutdown
-
-# 3. 그래도 멈춰 있으면 프로세스를 종료합니다
-Get-Process *docker* | Stop-Process -Force
-wsl --shutdown
-
-# 4. Docker Desktop 을 다시 실행합니다
-```
-
-다시 실행한 뒤 **Settings → Resources → WSL integration** 에서 배포판 통합을 끕니다(1-1절 참고). 이 설정을 끄지 않으면 팝업이 반복되며 같은 상태로 돌아갑니다.
-
-문제가 계속되면 범위를 좁힙니다.
-
-```powershell
-docker run --rm hello-world                                   # 도커 자체
-docker run --rm -v C:\Tour_Prj\infra\init-db:/t:ro alpine ls /t   # 볼륨 마운트
-docker compose up -d                                          # 이 저장소
-```
-
-첫 번째에서 실패하면 Compose 파일과 무관한 문제입니다.
-
-### `failed to set up container networking: network ... not found`
-
-**재부팅한 뒤 자주 나옵니다.** 컨테이너가 옛 네트워크 식별자를 들고 있는데 그 네트워크는 이미 사라진 상태입니다.
-
-```powershell
-docker compose down --remove-orphans
-docker network prune -f
 docker compose up -d
 ```
 
-`prune` 은 아무 컨테이너도 쓰지 않는 네트워크만 지우므로 안전합니다.
+<br><br>
 
-`down` 에서 `Resource is still in use` 가 나오면 **프로파일을 일부만 지정한 것입니다.** 3장을 참고해 전부 내립니다.
+---
 
-### `ports are not available ... bind: An attempt was made to access a socket in a way forbidden`
+### 8-3. Kafka
 
-포트를 다른 프로그램이 쓰는 것이 아니라 **윈도우가 예약해 버린 것입니다.** Hyper-V 나 WSL 이 동적 포트 대역을 잡으면서 생기며, 재부팅할 때마다 잡는 자리가 달라져 **어제 되던 것이 오늘 안 되기도 합니다.**
+| 증상 | 원인 |
+|---|---|
+| `UNKNOWN_TOPIC_OR_PARTITION` 반복 | **토픽을 안 만들었음** → `create-topics.sh` |
+| 토픽이 사라짐 | **볼륨이 없어 `down` 하면 사라짐.** 재실행하면 복구 |
+| 호스트에서 접속이 안 됨 | **29092** 를 씀. 9092 는 컨테이너끼리 |
+| Kafka UI 에서 오프셋 리셋이 안 됨 | 그 컨슈머 그룹이 **활성 상태**. 서비스를 먼저 내릴 것 |
 
-어느 대역이 막혀 있는지 봅니다.
+<br><br>
 
-```powershell
-netsh interface ipv4 show excludedportrange protocol=tcp
+---
+
+### 8-4. 관측 스택
+
+| 증상 | 원인 |
+|---|---|
+| Grafana 에 Connections 메뉴가 없음 | **프로비저닝으로 이미 등록됨.** Explore 에서 바로 고르면 됨 |
+| Prometheus 타깃이 DOWN | 그 서비스가 꺼져 있음. **`connection refused` 면 이름은 풀린 것** |
+| 타깃이 `no such host` | 주소 해석 실패 — 이름이 잘못됨 |
+| 지표가 안 모임 | **`metrics_path` 를 빠뜨렸음** |
+| Loki 에 로그가 없음 | 서비스가 `local` 프로파일이면 **안 보냅니다** (의도) |
+
+```bash
+# Loki 가 받고 있는지
+curl http://localhost:3100/loki/api/v1/labels
 ```
 
-우리가 쓰는 포트(3000·3100·5432·6379·8080·8081~8095·8761·8888·9000·9090·9092·9411·29092)가 그 범위에 들어 있으면 이 문제입니다.
+**응답에 `data` 필드가 있어야 합니다.**
 
-**관리자 PowerShell** 에서 동적 포트 시작점을 우리 대역 위로 올립니다.
-
-```powershell
-netsh int ipv4 set dynamicport tcp start=49152 num=16384
-netsh int ipv6 set dynamicport tcp start=49152 num=16384
-```
-
-`49152` 는 표준이 정한 동적 포트 시작점입니다. **재부팅해야 반영되며**, 그 뒤 위 확인 명령을 다시 실행해 낮은 대역이 사라졌는지 봅니다. 설정은 레지스트리에 남으므로 한 번만 하면 됩니다.
+<br><br>
 
 ---
 
 ## 9. 환경별 주의사항
 
-### Windows
-
-**줄바꿈** — 저장소에 `.gitattributes` 가 있어 모든 텍스트 파일이 LF로 유지됩니다. 셸 스크립트가 CRLF로 저장되면 컨테이너 안에서 `exec ...: no such file or directory` 로 실패하며, 파일이 분명히 존재하는데 없다고 나오므로 원인을 찾기 어렵습니다.
-
-작업 파일의 상태는 다음으로 확인합니다. `i/` 는 저장소, `w/` 는 디스크입니다.
-
-```powershell
-git ls-files --eol
-```
-
-전부 `i/lf w/lf` 여야 합니다. `w/crlf` 가 보이면 아래로 정리합니다. 커밋하지 않은 변경은 사라지므로 반드시 커밋 후에 실행합니다.
-
-```powershell
-git rm --cached -r .
-git reset --hard
-```
-
-**편집기** — 이 저장소의 파일은 IntelliJ로 편집합니다. 메모장으로 만든 셸 스크립트는 CRLF, BOM, `.txt` 확장자 자동 부착 세 가지 문제가 모두 같은 오류 메시지로 나타나 구분되지 않습니다. 저장소에 `.editorconfig` 가 있어 IntelliJ는 별도 설정 없이 LF로 저장합니다.
-
-**포트 예약** — 어제까지 잘 뜨던 컨테이너가 갑자기 아래 오류로 실패할 때가 있습니다.
-
-```
-Error response from daemon: ports are not available: exposing port TCP 0.0.0.0:3100 -> ...
-: An attempt was made to access a socket in a way forbidden by its access permissions.
-```
-
-**다른 프로그램이 그 포트를 쓰고 있다는 뜻이 아니라, 윈도우가 그 포트를 못 쓰게 막았다는 뜻입니다.** Hyper-V와 WSL2가 부팅할 때 TCP 포트 대역을 100개 단위로 예약해 가는데, 그 범위가 **부팅할 때마다 달라지므로** 어제 되던 포트가 오늘 안 되는 일이 생깁니다. 3000, 3100, 5432, 6379, 9000, 9090, 9411, 29092 중 어느 것이든 걸릴 수 있습니다.
-
-먼저 진짜로 예약된 것인지 확인합니다. **관리자 권한 PowerShell**이 필요합니다.
-
-```powershell
-netstat -ano | findstr :3100
-netsh interface ipv4 show excludedportrange protocol=tcp
-```
-
-첫 번째 명령은 **아무것도 나오지 않는 것이 정상**입니다. 무언가 나온다면 실제로 다른 프로세스가 점유한 것이므로 원인이 다릅니다. 두 번째 명령의 표에서 문제의 포트가 어느 범위 안에 들어가는지 확인합니다.
-
-```
-시작 포트    끝 포트
-----------    --------
-      3027        3126        ← 3100 이 이 범위에 갇혀 있습니다
-```
-
-해결은 NAT 서비스를 다시 시작하는 것입니다. 예약이 풀립니다.
-
-```powershell
-net stop winnat
-net start winnat
-```
-
-`winnat` 은 도커와 WSL의 포트 매핑을 담당하므로 재시작 중에는 실행 중인 컨테이너의 네트워크가 잠시 끊깁니다. 다시 확인해 문제의 포트가 어느 범위에도 없으면 `docker compose up -d` 로 재기동합니다.
-
-재부팅할 때마다 반복된다면 해당 포트를 영구히 제외하거나(`netsh int ipv4 add excludedportrange ... store=persistent`), Compose의 호스트 포트를 예약 대역 밖으로 옮깁니다. **후자를 택할 때는 config 저장소의 `app.logging.loki.url` 처럼 그 포트를 가리키는 값도 함께 고쳐야 합니다.**
-
-이 문제는 Hyper-V와 WSL2 고유의 것이므로 macOS에서는 발생하지 않습니다.
-
-### macOS (Apple Silicon)
-
-`postgis/postgis` 이미지는 amd64만 제공하므로 Compose에 `platform: linux/amd64` 를 명시해 두었습니다. 에뮬레이션으로 동작하며 로컬 개발에는 지장이 없습니다.
-
-평소 개발에서는 PostgreSQL을 로컬에 띄우지 않고 공용 인스턴스를 사용하므로 영향이 적습니다. Testcontainers를 사용하는 통합 테스트에서만 에뮬레이션 속도를 체감할 수 있습니다.
-
-나머지 이미지(Kafka, Redis, Prometheus, Grafana, Loki, Zipkin, Kafka UI)는 arm64를 지원합니다.
+<br><br>
 
 ---
 
-## 10. 디렉터리 구조
+### 9-1. Windows
+
+| | |
+|---|---|
+| PowerShell `curl` | `Invoke-WebRequest` 별칭 → **`curl.exe`** |
+| 한글 바디 전송 | `-d '{"..."}'` 의 따옴표를 먹음 → **`Set-Content` 로 파일에 쓰고 `-d "@파일"`** |
+| 줄바꿈 | `.sh` 는 반드시 **LF**. CRLF 면 `\r: command not found` |
+| 예약 포트 | [8-1](#8-1-컨테이너가-안-뜰-때) |
+| WSL 메모리 | Docker Desktop 이 WSL2 위에서 돎 |
+
+---
+
+<br><br>
+
+---
+
+### 9-2. macOS (Apple Silicon)
+
+| | |
+|---|---|
+| 이미지 아키텍처 | `docker build` 에 **`--platform linux/amd64`** 를 붙일 것 |
+| | 안 붙이면 arm64 이미지가 되어 배포 서버(x86)에서 안 돎 |
+| 메모리 | Docker Desktop 기본이 낮을 수 있음 → 4GB 이상 |
+
+<br><br>
+
+---
+
+## 10. 아직 안 한 것
+
+| 언제 | 무엇 |
+|---|---|
+| **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth 하나) |
+| **ingest 착수 시** | EC2 PostgreSQL — 수집 데이터 공유가 필요해짐 |
+| **user · pet 이 생기면** | `scripts/seed.sh` — 테스트 데이터 시드 |
+| **nginx 를 붙일 때** | `edge` 프로파일 · `nginx.conf` |
+| 수집 배치를 만들 때 | `pipeline` 프로파일 |
+
+---
+
+**아직 compose 에 없는 것입니다.**
 
 ```
-infra/
-├── docker-compose.yml       한 벌, 프로파일 8개로 구성을 고릅니다
-├── .env.example             복사해 .env 로 사용합니다
-├── .gitattributes           줄바꿈 규칙
-├── .editorconfig            편집기 규칙
-├── init-db/                 db 프로파일과 공용 인스턴스 구축에 모두 사용합니다
-│   ├── 01-databases.sh      데이터베이스 10개와 전용 계정 생성
-│   └── 02-extensions.sh     PostGIS, pg_trgm 설치
-├── kafka/
-│   └── create-topics.sh     토픽 6개와 DLQ 6개 생성
-├── prometheus/
-│   └── prometheus.yml       수집 타깃
-└── grafana/
-    └── provisioning/
-        └── datasources/
-            └── datasources.yml   데이터소스 자동 등록
+edge       nginx
+pipeline   ingest · extract
+app        도메인 서비스 13개 (auth 만 있음)
 ```
+
+**해당 저장소가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가합니다.**
