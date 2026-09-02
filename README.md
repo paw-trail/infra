@@ -621,7 +621,7 @@ extract                          raw_db 를 읽고 policy 에 넘김 (자기 DB 
 도메인 이벤트 6개 + 각각의 .dlq
 
 place.updated          place    ──▶  search
-policy.changed         policy   ──▶  search · notification
+policy.changed         policy   ──▶  notification · verdict
 pet.profile.updated    pet      ──▶  verdict
 account.created        auth     ──▶  user
 account.withdrawn      auth     ──▶  user · pet · report · review · notification

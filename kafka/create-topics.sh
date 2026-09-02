@@ -27,7 +27,7 @@ REPLICATION="${REPLICATION:-1}"
 
 KAFKA_BIN="/opt/kafka/bin"
 
-# 도메인 이벤트 5개
+# 도메인 이벤트 6개
 #   place.updated        place  -> search                    색인 갱신
 #   policy.changed       policy -> notification, verdict      조건 변경 알림, 판정 캐시 무효화
 #   pet.profile.updated  pet    -> verdict                    판정 캐시 무효화
