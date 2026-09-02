@@ -3,6 +3,30 @@
 **함께하개의 로컬 개발 환경입니다.** DB · 메시지 큐 · 플랫폼 서비스를 컨테이너로
 한 번에 띄웁니다.
 
+---
+
+**먼저 전체 그림을 보고, 이 레포가 그 안 어디에 있는지 본 뒤 읽습니다.**
+
+**① 전체 구조 — 층으로 본 것.** 위에서 아래로 요청이 내려가고, 어느 층에 무엇이 있는지.
+
+![전체 구조 (층)](https://raw.githubusercontent.com/paw-trail/service-template/main/docs/architecture-layers.svg)
+
+**② 전체 구조 — 서비스끼리 무엇을 주고받는지.** 초록 실선이 `/internal` 호출, Kafka 표가 이벤트, 하늘색 점선이 VPC 경계.
+
+![전체 구조 (호출 관계)](https://raw.githubusercontent.com/paw-trail/service-template/main/docs/architecture.svg)
+
+**③ 이 레포를 중심으로.** 직접 연결된 것만 남긴 그림.
+
+![infra 를 중심으로](docs/focus-infra.svg)
+
+> ①② 는 `service-template/docs` 에 있는 것을 가리킵니다. 서비스가 늘어도 그쪽 한 곳만 고칩니다.
+
+<br><br>
+
+---
+
+## 본문 시작
+
 ```
 [ 내 컴퓨터 ]
 
@@ -170,6 +194,7 @@ docker compose up -d           한 번에 띄움
 | 플랫폼 이미지를 다시 굽는다 | [7장](#7-이미지-만들어-올리기) |
 | 뭔가 안 된다 | [8장](#8-막히기-쉬운-자리) |
 | Windows · macOS 차이 | [9장](#9-환경별-주의사항) |
+| 모르는 말이 나온다 | [11장](#11-용어) |
 
 <br><br>
 
