@@ -458,7 +458,7 @@ docker compose --profile app up -d
 | **auth 를 고치는 중** | `infra,platform,db,tools` |
 | **auth 를 컨테이너로 띄움** | `infra,platform,db,tools,app` |
 | 대시보드·추적을 볼 때 | 위 조합 + `,observability` |
-| 수집 배치를 돌릴 때 | 위 조합 + `,pipeline` |
+| 수집 배치를 돌릴 때 | 위 조합 + `,pipeline` — ⚠**아직 compose 에 없음** |
 
 > **`.env` 는 사람마다 다른 파일입니다.** 각자 자기 방식대로 두면 됩니다.
 > auth 를 고치지 않는 팀원은 `app` 을 넣어 두는 편이 편합니다.
@@ -748,7 +748,8 @@ docker compose logs -f auth-service
 docker compose logs postgres | grep init-db
 
 # 이미지 갱신 — up -d 만으로는 안 받음
-docker compose pull auth-service
+docker compose pull auth-service      # 하나만
+docker compose pull                   # 켜 둔 것 전부
 docker compose up -d
 
 # 토픽 재생성 (멱등)
@@ -924,9 +925,19 @@ EC2 가 필요해지는 것은 ingest 착수 시점
 
 ### 7-1. 처음 한 번
 
+**Windows (PowerShell)**
+
 ```powershell
 $env:GPR_TOKEN | docker login ghcr.io -u <GitHub 아이디> --password-stdin
 ```
+
+**macOS**
+
+```bash
+echo $GPR_TOKEN | docker login ghcr.io -u <GitHub 아이디> --password-stdin
+```
+
+> 환경변수에 토큰이 없으면 값을 직접 넣어도 됩니다. 다만 **셸 이력에 남습니다.**
 
 | 걸리는 것 | 증상 |
 |---|---|
@@ -943,6 +954,8 @@ $env:GPR_TOKEN | docker login ghcr.io -u <GitHub 아이디> --password-stdin
 
 ### 7-2. 굽고 올리기
 
+**Windows (PowerShell)**
+
 ```powershell
 cd C:\Tour_Prj\<서비스>
 .\gradlew clean build
@@ -950,6 +963,19 @@ cd C:\Tour_Prj\<서비스>
 docker buildx build --platform linux/amd64,linux/arm64 `
   -t ghcr.io/paw-trail/<서비스>:latest --push .
 ```
+
+**macOS**
+
+```bash
+cd ~/<서비스>
+./gradlew clean build
+
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/paw-trail/<서비스>:latest --push .
+```
+
+> **줄 이어 쓰기 문자가 다릅니다.** PowerShell 은 백틱, macOS 는 역슬래시입니다.
+> 한 줄로 쓰면 둘 다 그 문자가 필요 없습니다.
 
 **`buildx` 로 두 아키텍처를 함께 굽습니다.** 굽는 기기가 무엇이든 결과가 같습니다.
 
@@ -1028,16 +1054,24 @@ GitHub 조직 → Packages → 해당 패키지 → Package settings
 
 ---
 
-### 7-4. 레이어는 재사용됩니다
+### 7-4. 두 아키텍처를 굽는 부담이 거의 없습니다
 
 ```
-5174317795d5: Pushed
-44136fa355b3: Mounted from paw-trail/gateway-server
-3c7ed5940eeb: Mounted from paw-trail/gateway-server
-...
+ => [linux/arm64 3/3] COPY build/libs/*.jar app.jar          0.8s
+ => [linux/amd64 3/3] COPY build/libs/*.jar app.jar          0.8s
+ => exporting to image                                      16.6s
+ => => exporting manifest list sha256:de2f7230...             0.0s
+ => => pushing layers                                        9.4s
 ```
 
-**베이스 이미지가 같아 실제로 올라가는 것은 우리 jar 하나뿐입니다.**
+**아키텍처별 레이어가 각각 1초 안에 끝납니다.** `Dockerfile` 이 jar 를 복사하는
+것뿐이라 다른 아키텍처를 흉내내어 명령을 실행할 일이 없습니다.
+
+> **`exporting manifest list` 가 나와야 멀티아치입니다.** 이 줄이 없으면
+> 아키텍처가 하나뿐인 이미지입니다.
+
+**베이스 이미지가 같아 실제로 올라가는 것은 우리 jar 하나뿐입니다.** 같은 층은
+다시 올리지 않고 다른 저장소의 것을 가져다 씁니다.
 
 <br><br>
 
@@ -1059,6 +1093,7 @@ GitHub 조직 → Packages → 해당 패키지 → Package settings
 | `network ... not found` | 이전 `down` 이 덜 끝남 → `docker compose down` 후 다시 |
 | `up -d` 가 `Starting` 에서 멈춤 | Docker Desktop 이 먹통 — 아래 |
 | `ports are not available ... forbidden` | **윈도우 예약 포트** — 아래 |
+| `no matching manifest for linux/arm64/v8` | **이미지에 그 아키텍처가 없음** — 아래 |
 
 ---
 
@@ -1088,6 +1123,47 @@ netsh int ipv4 show excludedportrange protocol=tcp
 # 범위를 위로 옮김 (관리자 권한, 재부팅 필요)
 netsh int ipv4 set dynamicport tcp start=49152 num=16384
 ```
+
+---
+
+**`no matching manifest for linux/arm64/v8` (주로 macOS)**
+
+**이미지에 그 컴퓨터의 아키텍처가 담겨 있지 않다는 뜻입니다.**
+
+```
+[+] Running 7/8
+ ✘ auth-service    Error context canceled
+ ⠹ config-server   Pulling
+ ✘ postgres        Error context canceled
+ ✘ kafka           Error context canceled
+ ...
+no matching manifest for linux/arm64/v8 in the manifest list entries
+```
+
+> ⚠ **`Error context canceled` 에 속지 않습니다.** 하나가 실패하면 도커가 나머지를
+> 전부 취소하면서 붙는 표시입니다. **실제 원인은 마지막 한 줄뿐입니다.**
+>
+> **`.env` 나 compose 문제가 아닙니다.** 파일은 정상인데 받을 이미지가 없는 것입니다.
+
+| 확인 | |
+|---|---|
+| 어느 이미지인지 | `docker buildx imagetools inspect ghcr.io/paw-trail/<서비스>:latest` |
+| 정상 | `MediaType` 이 `image.index` 이고 `linux/amd64` · `linux/arm64` 가 둘 다 |
+| 문제 | `image.manifest` 하나뿐이거나 아키텍처가 하나만 |
+
+**고치는 사람은 그 이미지를 올린 사람입니다.** [7-2](#7-2-굽고-올리기) 의 `buildx`
+명령으로 다시 굽습니다. 옛 `docker build` 로 구우면 **구운 기기의 아키텍처 하나만**
+담깁니다.
+
+다시 올라온 뒤에는 받는 쪽에서 이렇게 합니다.
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+> **`pull` 을 먼저 합니다.** `up -d` 만으로는 이미 가진 이미지를 그대로 쓰고,
+> 실패한 상태가 남아 있으면 고쳐지지 않습니다.
 
 <br><br>
 
@@ -1231,4 +1307,6 @@ app        도메인 서비스 13개 (auth 만 있음)
 | **PostGIS** | PostgreSQL 에 좌표·거리 계산을 더하는 확장 |
 | **pg_trgm** | 오타·부분 일치 검색을 위한 확장 |
 | **ghcr** | GitHub 의 컨테이너 이미지 저장소. `ghcr.io/paw-trail/...` |
-| **레이어** | 이미지를 이루는 층. 같은 층은 다시 안 올림 (`Mounted from`) |
+| **매니페스트 목록** | 아키텍처별 이미지를 묶어 둔 것. 받는 쪽이 자기 아키텍처를 골라 감 |
+| **멀티아치 이미지** | 매니페스트 목록을 가진 이미지. `buildx build --platform` 으로 만듦 |
+| **레이어** | 이미지를 이루는 층. 같은 층은 다시 올리지 않음 |
