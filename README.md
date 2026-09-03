@@ -912,10 +912,10 @@ EC2 가 필요해지는 것은 ingest 착수 시점
 ② ghcr 로그인                기기당 한 번
         │
         ▼
-③ docker build · push
+③ docker buildx build --push       amd64 · arm64 둘 다
         │
         ▼
-④ 팀원은  docker compose pull <서비스> && docker compose up -d
+④ 팀원은  docker compose pull && docker compose up -d
 ```
 
 <br><br>
@@ -947,11 +947,52 @@ $env:GPR_TOKEN | docker login ghcr.io -u <GitHub 아이디> --password-stdin
 cd C:\Tour_Prj\<서비스>
 .\gradlew clean build
 
-docker build -t ghcr.io/paw-trail/<서비스>:latest .
-docker push ghcr.io/paw-trail/<서비스>:latest
+docker buildx build --platform linux/amd64,linux/arm64 `
+  -t ghcr.io/paw-trail/<서비스>:latest --push .
 ```
 
-**확인**
+**`buildx` 로 두 아키텍처를 함께 굽습니다.** 굽는 기기가 무엇이든 결과가 같습니다.
+
+| 걸리는 것 | 왜 |
+|---|---|
+| `--push` 를 빼면 아무것도 안 남음 | 여러 아키텍처를 담은 이미지는 **로컬 저장소에 넣을 수 없습니다.** `--load` 는 한 아키텍처만 가능하고, 둘 다 빼면 굽기만 하고 버립니다 |
+| `multiple platforms feature is currently not supported` | 빌더를 한 번 만들어야 합니다 (아래) |
+
+```powershell
+docker buildx create --name multiarch --driver docker-container --use --bootstrap
+```
+
+> **왜 두 아키텍처를 다 굽는가**
+>
+> 배포 서버는 x86 이고 팀원 중에 Apple Silicon 맥이 있습니다. 한쪽만 담으면
+> **다른 쪽에서 `no matching manifest for linux/arm64/v8` 로 컨테이너가 아예 뜨지 않습니다.**
+>
+> 부담은 거의 없습니다. Dockerfile 에 `RUN` 이 하나도 없고 jar 를 복사하는 것뿐이라
+> 다른 아키텍처를 흉내내어 명령을 실행할 일이 없습니다. 두 레이어가 각각 1초 안에 끝납니다.
+
+**확인 — 아키텍처**
+
+```powershell
+docker buildx imagetools inspect ghcr.io/paw-trail/<서비스>:latest
+```
+
+`linux/amd64` 와 `linux/arm64` 가 **둘 다** 나와야 합니다.
+
+```
+MediaType: application/vnd.oci.image.index.v1+json
+
+  Platform:    linux/amd64
+  Platform:    linux/arm64
+  Platform:    unknown/unknown      ← 빌드 증명, 정상입니다
+  Platform:    unknown/unknown
+```
+
+> **`MediaType` 이 `image.index` 여야 합니다.** `image.manifest` 하나만 나오면
+> 아키텍처가 하나뿐인 이미지이며, 다른 아키텍처에서는 내려받지 못합니다.
+>
+> `unknown/unknown` 두 줄은 각 아키텍처의 빌드 증명입니다. 실행에 관여하지 않습니다.
+
+**확인 — 내용물**
 
 ```powershell
 docker run --rm --entrypoint sh ghcr.io/paw-trail/<서비스>:latest -c "ls -lh /app"
@@ -1131,9 +1172,13 @@ curl http://localhost:3100/loki/api/v1/labels
 
 | | |
 |---|---|
-| 이미지 아키텍처 | `docker build` 에 **`--platform linux/amd64`** 를 붙일 것 |
-| | 안 붙이면 arm64 이미지가 되어 배포 서버(x86)에서 안 돎 |
+| 이미지 아키텍처 | **신경 쓰지 않아도 됩니다.** 7-2 절의 `buildx` 명령이 amd64 와 arm64 를 함께 굽습니다 |
+| | 어느 기기에서 굽든 결과가 같으므로 맥에서 올려도 배포 서버(x86)에서 돕니다 |
 | 메모리 | Docker Desktop 기본이 낮을 수 있음 → 4GB 이상 |
+
+> ⚠ **`postgis/postgis` 는 amd64 만 제공합니다.** `db` 프로파일을 켜면 에뮬레이션으로
+> 돌아가며, compose 에 `platform: linux/amd64` 를 명시해 두었으므로 경고가 아니라
+> 의도된 동작입니다. 나머지 이미지는 모두 arm64 를 지원합니다.
 
 <br><br>
 
