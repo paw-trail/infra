@@ -353,9 +353,16 @@ docker compose config --services
 ### 2-3. 기동
 
 ```bash
+docker compose pull
 docker compose up -d
 docker compose ps
 ```
+
+> **`pull` 을 먼저 합니다.** `up -d` 는 **이미지가 없을 때만** 내려받고,
+> 이미 갖고 있으면 낡았더라도 그대로 씁니다. 플랫폼과 도메인 서비스 이미지는
+> 다른 사람이 고쳐 다시 올리므로 **내 컴퓨터의 사본이 조용히 뒤처집니다.**
+>
+> 처음 받을 때는 없던 이미지라 `up -d` 만으로도 같지만, **습관으로 붙여 둡니다.**
 
 **`STATUS` 가 전부 `(healthy)` 가 될 때까지 40초쯤 걸립니다.**
 
@@ -913,7 +920,7 @@ EC2 가 필요해지는 것은 ingest 착수 시점
 ② ghcr 로그인                기기당 한 번
         │
         ▼
-③ docker buildx build --push       amd64 · arm64 둘 다
+③ docker buildx build --platform linux/amd64,linux/arm64 --push
         │
         ▼
 ④ 팀원은  docker compose pull && docker compose up -d
@@ -1308,5 +1315,5 @@ app        도메인 서비스 13개 (auth 만 있음)
 | **pg_trgm** | 오타·부분 일치 검색을 위한 확장 |
 | **ghcr** | GitHub 의 컨테이너 이미지 저장소. `ghcr.io/paw-trail/...` |
 | **매니페스트 목록** | 아키텍처별 이미지를 묶어 둔 것. 받는 쪽이 자기 아키텍처를 골라 감 |
-| **멀티아치 이미지** | 매니페스트 목록을 가진 이미지. `buildx build --platform` 으로 만듦 |
+| **멀티아치 이미지** | 매니페스트 목록을 가진 이미지. `buildx build --platform linux/amd64,linux/arm64` 로 만듦 |
 | **레이어** | 이미지를 이루는 층. 같은 층은 다시 올리지 않음 |
