@@ -59,6 +59,11 @@ scrape_configs:
           - "host.docker.internal:8081"
         labels:
           application: auth-service
+          
+      - targets:
+          - "host.docker.internal:8082"
+        labels:
+          application: user-service
 
       - targets:
           - "host.docker.internal:8095"
