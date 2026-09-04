@@ -625,7 +625,7 @@ policy.changed         policy   ──▶  notification · verdict
 pet.profile.updated    pet      ──▶  verdict
 account.created        auth     ──▶  user
 account.withdrawn      auth     ──▶  user · pet · report · review · notification
-report.reviewed        report   ──▶  notification
+report.resolved        report   ──▶  notification
 ```
 
 ---

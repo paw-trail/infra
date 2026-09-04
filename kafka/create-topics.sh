@@ -33,14 +33,14 @@ KAFKA_BIN="/opt/kafka/bin"
 #   pet.profile.updated  pet    -> verdict                    판정 캐시 무효화
 #   account.created      auth   -> user                       가입 시 프로필 생성
 #   account.withdrawn    auth   -> user, pet, report, review, notification
-#   report.reviewed      report -> notification               제보 처리 결과 통보
+#   report.resolved      report -> notification               제보 처리 결과 통보
 TOPICS=(
   "place.updated"
   "policy.changed"
   "pet.profile.updated"
   "account.created"
   "account.withdrawn"
-  "report.reviewed"
+  "report.resolved"
 )
 
 create_topic() {
