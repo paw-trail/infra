@@ -1178,18 +1178,92 @@ docker compose up -d
 
 ### 8-2. PostgreSQL
 
-| 증상 | 원인 |
-|---|---|
-| DB 가 안 만들어짐 | **볼륨이 이미 있음.** init 은 **처음 한 번만** 돎 → `down -v` 후 다시 |
-| `role does not exist` | 계정이 없음 — 위와 같음 |
-| `password authentication failed` | **계정은 있고 비밀번호만 다름.** `SERVICE_DB_PASSWORD` 확인 |
-| 비밀번호를 바꿨는데 안 먹음 | 같음. **DB 를 다시 만들어야 함** |
-| Flyway `Detected applied migration not resolved locally` | **볼륨에 옛 이력이 남음** → `down -v` |
+**먼저 init 이 성공했는지 봅니다.** 아래 대부분의 증상이 여기서 갈립니다.
+
+```bash
+docker compose logs postgres | grep "init-db"
+```
+
+`[init-db] done: 10 databases` 와 `[init-db] extensions done` 이 둘 다 보여야 정상입니다.
+
+> ⚠ **PostgreSQL 은 init 스크립트가 실패해도 컨테이너를 그대로 띄웁니다.**
+> 그래서 계정이 하나도 없는 상태로 기동되고, 문제는 한참 뒤 서비스를 붙일 때
+> `password authentication failed` 로 나타납니다. **원인과 증상이 다른 자리에서
+> 드러나므로** 비밀번호부터 의심하지 말고 위 로그를 먼저 확인하십시오.
+
+---
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| init 로그에 `bad interpreter: Permission denied` | ★**스크립트에 실행 권한이 없음** | 아래 별도 항목 |
+| DB 가 안 만들어짐 | **볼륨이 이미 있음.** init 은 처음 한 번만 돎 | `down -v` 후 다시 |
+| `role does not exist` | 계정이 없음 — 위와 같음 | 같음 |
+| `password authentication failed` + **init 로그에 done 이 없음** | ★**계정이 아예 안 만들어짐.** 비밀번호 문제가 아님 | init 실패 원인을 먼저 해결한 뒤 `down -v` |
+| `password authentication failed` + **init 로그에 done 이 있음** | 계정은 있고 비밀번호만 다름 | `SERVICE_DB_PASSWORD` 확인 |
+| 비밀번호를 바꿨는데 안 먹음 | 계정은 **처음 만들 때의 값**을 유지함. `.env` 를 고쳐도 안 바뀜 | `down -v` 또는 `ALTER USER` |
+| Flyway `Detected applied migration not resolved locally` | **볼륨에 옛 이력이 남음** | `down -v` |
 
 ```bash
 docker compose --profile db down -v
 docker compose up -d
 ```
+
+계정과 DB 가 실제로 있는지는 이렇게 봅니다.
+
+```bash
+docker exec -it pawtrail-postgres psql -U pawtrail -c "\du"   # 계정 10개
+docker exec -it pawtrail-postgres psql -U pawtrail -c "\l"    # DB 10개
+```
+
+<br><br>
+
+---
+
+#### `bad interpreter: Permission denied`
+
+init 로그가 이렇게 끝나 있으면 **스크립트 파일에 실행 권한이 없는 것**입니다.
+
+```
+/docker-entrypoint-initdb.d/01-databases.sh: /bin/bash: bad interpreter: Permission denied
+```
+
+**윈도우에서 커밋했을 때 생깁니다.** 윈도우 파일시스템에는 실행 비트라는 개념이 없어
+Git 이 파일을 `100644` 로 스테이징하고, 커밋한 사람은 아무 이상을 못 봅니다.
+반면 macOS 에서는 그 파일을 실행하지 못해 init 이 통째로 실패합니다.
+
+확인 — 전부 `100755` 여야 합니다.
+
+```bash
+git ls-files -s init-db/ kafka/
+```
+
+`100644` 가 하나라도 있으면 저장소를 고쳐야 합니다. **각자 로컬에서 `chmod` 하는 것은
+임시방편이며, 다음 사람이 클론하면 그대로 재발합니다.**
+
+```powershell
+# Windows — chmod 가 없으므로 Git 에 직접 지정합니다
+git update-index --chmod=+x init-db/01-databases.sh
+git update-index --chmod=+x init-db/02-extensions.sh
+git update-index --chmod=+x kafka/create-topics.sh
+git commit -m "fix: mark container entrypoint scripts as executable"
+```
+
+```bash
+# macOS
+chmod +x init-db/*.sh kafka/*.sh
+git add init-db kafka
+git commit -m "fix: mark container entrypoint scripts as executable"
+```
+
+고친 뒤에는 **볼륨을 지우고 다시 띄워야** init 이 다시 돕니다.
+
+```bash
+git pull
+docker compose down -v && docker compose up -d
+```
+
+> `.gitattributes` 가 줄바꿈(CRLF)은 막아주지만 **실행 비트는 막지 못합니다.**
+> 컨테이너가 실행하는 스크립트를 새로 추가할 때마다 위 확인을 거치십시오.
 
 <br><br>
 
@@ -1251,6 +1325,20 @@ curl http://localhost:3100/loki/api/v1/labels
 
 ---
 
+> ⚠ **셸 스크립트를 추가하거나 수정하면 실행 권한을 함께 커밋하십시오.**
+> 윈도우에는 실행 비트가 없어 Git 이 `100644` 로 스테이징하며, 커밋한 쪽에서는
+> 아무 이상이 보이지 않습니다. macOS 에서만 `bad interpreter: Permission denied`
+> 로 init 이 실패하고, 증상은 한참 뒤 `password authentication failed` 로 나타납니다.
+>
+> ```powershell
+> git update-index --chmod=+x <파일경로>
+> git ls-files -s init-db/ kafka/      # 전부 100755 인지 확인
+> ```
+
+<br><br>
+
+---
+
 ### 9-2. macOS (Apple Silicon)
 
 | | |
@@ -1259,9 +1347,13 @@ curl http://localhost:3100/loki/api/v1/labels
 | | 어느 기기에서 굽든 결과가 같으므로 맥에서 올려도 배포 서버(x86)에서 돕니다 |
 | 메모리 | Docker Desktop 기본이 낮을 수 있음 → 4GB 이상 |
 
-> ⚠ **`postgis/postgis` 는 amd64 만 제공합니다.** `db` 프로파일을 켜면 에뮬레이션으로
-> 돌아가며, compose 에 `platform: linux/amd64` 를 명시해 두었으므로 경고가 아니라
-> 의도된 동작입니다. 나머지 이미지는 모두 arm64 를 지원합니다.
+> ⚠ **`postgis/postgis` 는 amd64 로 돌아갑니다.** compose 에 `platform: linux/amd64`
+> 를 명시해 두었으므로 "platform does not match" 경고가 떠도 의도된 동작입니다.
+> 나머지 이미지는 모두 arm64 를 지원합니다.
+>
+> 에뮬레이션이라 **기동이 조금 느리고 CPU 를 더 씁니다.** 다만 실패의 원인이 되지는
+> 않으므로, `db` 프로파일에서 문제가 생기면 아키텍처보다 **8-2 의 init 로그를 먼저**
+> 확인하십시오. 실제로 겪은 사고는 전부 아키텍처가 아니라 init 실패였습니다.
 
 <br><br>
 
