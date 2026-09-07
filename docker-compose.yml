@@ -370,6 +370,64 @@ services:
     networks: [pawtrail]
 
   # ---------------------------------------------------------------------------
+  # user-service
+  # ---------------------------------------------------------------------------
+  # 프로필 · 즐겨찾기 · 방문 기록 · 일정 · 하루 요약을 맡음
+  #
+  # auth 와 갈리는 자리가 셋임
+  #   의존이 넷    postgres · config-server 외에 redis · kafka 도 씀
+  #                이벤트를 받는 첫 서비스라 kafka 가 없으면 프로필이 안 생김
+  #   비밀값       AWS 액세스 키 2개와 OpenAI 키
+  #   포트         8082 를 여는 이유는 게이트웨이를 거치지 않고 확인할 때 쓰기 때문임
+  user-service:
+    image: ghcr.io/paw-trail/user-service:latest
+    container_name: pawtrail-user-service
+    profiles: [app]
+    depends_on:
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      # * redis 와 kafka 가 없어도 기동은 되지만 기능이 반쯤 죽음
+      #   최근 장소와 하루 요약 제한이 redis 에 있고,
+      #   프로필을 만드는 것이 kafka 로 오는 account.created 임
+      #   쓰는 것은 다 적어 두어 기동 순서가 드러나게 함
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+
+      # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
+      #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
+      CONFIG_HOST: config-server
+      DB_HOST: postgres
+
+      # * 아래는 비밀값이라 .env 에서 읽음
+      #   config 는 공개 저장소라 키를 두지 않음
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+    ports:
+      # 8082 를 여는 이유
+      #   게이트웨이를 거치지 않고 직접 확인할 때 씀
+      #   X-User-Id 헤더만 손으로 넣으면 되어 쿠키와 토큰 만료가 변수에서 빠짐
+      #   /internal 두 개는 게이트웨이가 라우팅하지 않아 이쪽으로만 부를 수 있음
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    # Dockerfile 의 -XX:MaxRAMPercentage=70 이 이 값의 70% 까지 힙으로 씀
+    mem_limit: 640m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
   # Prometheus
   # ---------------------------------------------------------------------------
   # TODO: 첫 pull 이후 실제 버전으로 고정할 것

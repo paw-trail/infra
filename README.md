@@ -216,7 +216,7 @@ docker compose up -d           한 번에 띄움
 | `platform` | config-server | 8888 | 512m | **항상** |
 | | eureka-server | 8761 | 512m | **항상** |
 | | gateway-server | 8080 | 512m | **항상** |
-| `app` | auth-service | 8081 | 640m | auth 를 안 고칠 때 |
+| `app` | auth-service · user-service | 8081 · 8082 | 각 640m | 그 서비스를 안 고칠 때 |
 | `tools` | kafka-ui | **9000** | 512m | 토픽을 볼 때 |
 | `observability` | prometheus | 9090 | 512m | 지표를 볼 때 |
 | | loki | 3100 | 512m | |
@@ -321,6 +321,9 @@ copy .env.example .env
 | `AUTH_JWT_PRIVATE_KEY_B64` | 팀장에게 받음 | `app` 켤 때만 |
 | `AUTH_MAIL_PASSWORD` | 팀장에게 받음 | `app` 켤 때만 |
 | `AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | 팀장에게 받음 | `app` 켤 때만 |
+| `AWS_ACCESS_KEY_ID` | 팀장에게 받음 | `app` 켤 때만 |
+| `AWS_SECRET_ACCESS_KEY` | 팀장에게 받음 | `app` 켤 때만 |
+| `OPENAI_API_KEY` | 팀장에게 받음 | `app` 켤 때만 |
 
 > ⛔ **`.env` 는 커밋되지 않습니다.** `.gitignore` 에 있습니다.
 > **비밀값을 `.env.example` 에 적지 않습니다.**
