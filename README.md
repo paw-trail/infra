@@ -321,6 +321,8 @@ copy .env.example .env
 | `AUTH_JWT_PRIVATE_KEY_B64` | 팀장에게 받음 | `app` 켤 때만 |
 | `AUTH_MAIL_PASSWORD` | 팀장에게 받음 | `app` 켤 때만 |
 | `AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | 팀장에게 받음 | `app` 켤 때만 |
+| `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` | 팀장에게 받음 | user 를 컨테이너로 띄울 때 |
+| `OPENAI_API_KEY` | 팀장에게 받음 | 같음 |
 
 > ⛔ **`.env` 는 커밋되지 않습니다.** `.gitignore` 에 있습니다.
 > **비밀값을 `.env.example` 에 적지 않습니다.**
@@ -813,6 +815,8 @@ Run → Edit Configurations → Environment variables
 | `AUTH_JWT_PRIVATE_KEY_B64` | 팀장에게 받음 | auth 만 |
 | `AUTH_MAIL_PASSWORD` | 팀장에게 받음 | auth 만 |
 | `AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | 팀장에게 받음 | auth 만 |
+| `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` | 팀장에게 받음 | user 만 |
+| `OPENAI_API_KEY` | 팀장에게 받음 | user 만 |
 
 ```
 DB_HOST=localhost;SERVICE_DB_PASSWORD=...
