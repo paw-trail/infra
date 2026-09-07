@@ -321,8 +321,6 @@ copy .env.example .env
 | `AUTH_JWT_PRIVATE_KEY_B64` | 팀장에게 받음 | `app` 켤 때만 |
 | `AUTH_MAIL_PASSWORD` | 팀장에게 받음 | `app` 켤 때만 |
 | `AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | 팀장에게 받음 | `app` 켤 때만 |
-| `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` | 팀장에게 받음 | user 를 컨테이너로 띄울 때 |
-| `OPENAI_API_KEY` | 팀장에게 받음 | 같음 |
 
 > ⛔ **`.env` 는 커밋되지 않습니다.** `.gitignore` 에 있습니다.
 > **비밀값을 `.env.example` 에 적지 않습니다.**
@@ -815,8 +813,6 @@ Run → Edit Configurations → Environment variables
 | `AUTH_JWT_PRIVATE_KEY_B64` | 팀장에게 받음 | auth 만 |
 | `AUTH_MAIL_PASSWORD` | 팀장에게 받음 | auth 만 |
 | `AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | 팀장에게 받음 | auth 만 |
-| `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` | 팀장에게 받음 | user 만 |
-| `OPENAI_API_KEY` | 팀장에게 받음 | user 만 |
 
 ```
 DB_HOST=localhost;SERVICE_DB_PASSWORD=...
@@ -1302,6 +1298,37 @@ curl http://localhost:3100/loki/api/v1/labels
 ```
 
 **응답에 `data` 필드가 있어야 합니다.**
+
+<br><br>
+
+---
+
+### 8-5. Redis
+
+| 증상 | 원인 |
+|---|---|
+| `WRONGTYPE Operation against a key...` | **그 키에 예전 자료형이 남아 있음.** 아래 참고 |
+| 키가 통째로 사라짐 | **볼륨이 없어 컨테이너를 내리면 사라집니다** (의도) |
+| 호스트에서 접속이 안 됨 | 6379 를 씁니다. 컨테이너 이름은 `pawtrail-redis` |
+
+**자료형을 바꾼 키가 있습니다.**
+
+`recent:places:{accountId}` 는 처음에 목록이었다가 정렬 집합으로 바뀌었습니다.
+같은 키 이름을 그대로 쓰므로, 그 이전 코드로 값을 넣어 둔 Redis 에서는
+새 코드가 그 키를 건드리는 순간 `WRONGTYPE` 이 납니다.
+
+```bash
+# 자료형 확인 — zset 이어야 합니다
+docker exec -it pawtrail-redis redis-cli TYPE "recent:places:{accountId}"
+
+# list 로 나오면 지웁니다. 최근 본 장소 목록이라 지워도 기능에 지장이 없습니다
+docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
+```
+
+옮기는 코드를 두지 않은 것은 의도입니다.
+그 값이 남아 있는 곳이 없기 때문입니다 — 배포한 적이 없고,
+로컬에 있던 검증용 몇 건은 바꾸면서 지웠습니다.
+없는 데이터를 위해 상시 코드를 두면 그것이 영영 안 쓰이는 채로 남습니다.
 
 <br><br>
 
