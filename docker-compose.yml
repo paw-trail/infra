@@ -9,10 +9,10 @@
 #   observability  prometheus, grafana, loki, zipkin
 #   edge           nginx
 #   tools          kafka-ui
-#   pipeline       ingest, extract
+#   pipeline       ingest-service (extract 는 아직)
 #   app            도메인 서비스 (auth 부터 하나씩 추가함)
 #
-# 아직 파일에 들어 있지 않은 것은 edge 의 nginx, pipeline 2종, app 의 나머지 13종임
+# 아직 파일에 들어 있지 않은 것은 edge 의 nginx, pipeline 의 extract, app 의 나머지 12종임
 # 해당 저장소가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가함
 #
 # app 프로파일을 쓰려면 .env 의 COMPOSE_PROFILES 에 app 을 넣을 것
@@ -28,10 +28,14 @@
 #
 # 실행
 #   docker compose up -d
-#   .env 의 COMPOSE_PROFILES 가 평소 조합을 정하며 기본값은 infra,tools,observability 임
+#   .env 의 COMPOSE_PROFILES 가 평소 조합을 정하며 기본값은 infra,platform,db,tools 임
 #
 # 독립된 DB 가 필요할 때만 db 프로파일을 함께 켬
 #   docker compose --profile db up -d
+#
+# 수집 배치를 돌릴 때
+#   COMPOSE_PROFILES 에 pipeline 을 더함
+#   평소 조합에는 넣지 않는 편이 나음, 배치라 늘 떠 있을 이유가 없음
 #
 # 플랫폼 3종을 컨테이너로 띄울 때
 #   docker compose --profile platform up -d
@@ -424,6 +428,65 @@ services:
       retries: 5
       start_period: 40s
     # Dockerfile 의 -XX:MaxRAMPercentage=70 이 이 값의 70% 까지 힙으로 씀
+    mem_limit: 640m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
+  # ingest-service  (pipeline 프로파일)
+  # ---------------------------------------------------------------------------
+  # 공공데이터를 받아 원본 그대로 raw_db 에 담음
+  #
+  # app 이 아니라 pipeline 인 이유
+  #   상시 기동이 아님, 화면이 없고 배치라 Jenkins 잡이 부를 때만 돎
+  #   app 에 두면 --profile app 으로 올릴 때 배치가 같이 뜸
+  #   ⚠배포 노드는 별개 축임, 그쪽에는 pipeline 이라는 노드가 없어 app 에 올라감
+  #
+  # auth·user 와 갈리는 자리가 넷임
+  #   의존이 둘      config-server · postgres 뿐임
+  #                  kafka 를 안 씀, 이벤트를 발행하지도 받지도 않음
+  #                  redis 도 안 씀
+  #   비밀값         공공데이터포털 인증키 하나
+  #                  포털이 계정마다 키를 하나만 주므로 이름에 소스가 안 들어감
+  #   CSV            이미지 안에 30.6MB 가 담겨 있어 마운트가 필요 없음
+  #   기동 시간      Flyway 두 개뿐이라 빠름, start_period 를 40s 로 둠
+  ingest-service:
+    image: ghcr.io/paw-trail/ingest-service:latest
+    container_name: pawtrail-ingest-service
+    profiles: [pipeline]
+    depends_on:
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+
+      # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
+      #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
+      CONFIG_HOST: config-server
+      DB_HOST: postgres
+
+      # * 아래는 비밀값이라 .env 에서 읽음
+      #   config 는 공개 저장소라 키를 두지 않음
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+      INGEST_PUBLIC_DATA_SERVICE_KEY: ${INGEST_PUBLIC_DATA_SERVICE_KEY}
+    ports:
+      # 8088 을 여는 이유
+      #   경로가 전부 /internal 이라 게이트웨이가 라우팅하지 않음
+      #   수집을 부르는 것도 결과를 보는 것도 이쪽으로만 됨
+      - "8088:8088"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8088/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    # Dockerfile 의 -XX:MaxRAMPercentage=70 이 이 값의 70% 까지 힙으로 씀
+    #
+    # 가장 많이 쥐고 있는 자리는 문화정보원 수집임
+    # 본 것을 기억하는 집합 13MB + 최종 13,408행 38MB = 51MB
+    # 힙이 448MB 라 여덟 배 여유가 있음
     mem_limit: 640m
     networks: [pawtrail]
 

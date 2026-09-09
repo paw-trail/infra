@@ -65,6 +65,12 @@ scrape_configs:
         labels:
           application: user-service
 
+      # ingest 는 8088 임, 도메인 순서(8081~)와 어긋나 보이지만 그 배정이 맞음
+      - targets:
+          - "host.docker.internal:8088"
+        labels:
+          application: ingest-service
+
       - targets:
           - "host.docker.internal:8095"
         labels:

@@ -44,7 +44,10 @@
   │                  gateway-server  8080        모든 요청의 입구
   │
   ├── app            auth-service    8081        개발이 끝난 도메인 서비스
-  │                                              (나머지 13개는 아직)
+  │                  user-service    8082        (나머지 12개는 아직)
+  │
+  ├── pipeline       ingest-service  8088        수집 배치
+  │                                              *상시 기동이 아님
   │
   ├── tools          kafka-ui        9000        토픽·메시지 보기
   │
@@ -72,8 +75,8 @@
 
 | | 값 | 어디에 |
 |---|---|---|
-| 컨테이너 | **12개** | [1-1](#1-1-무엇이-들어-있나) |
-| 프로파일 | 6개 | [3장](#3-프로파일--무엇을-띄울지-고르기) |
+| 컨테이너 | **13개** | [1-1](#1-1-무엇이-들어-있나) |
+| 프로파일 | 7개 | [3장](#3-프로파일--무엇을-띄울지-고르기) |
 | DB | 10개 | [4-2](#4-2-데이터베이스-10개) |
 | Kafka 토픽 | 12개 | [4-3](#4-3-kafka-토픽-12개) |
 | 코드 | **없음** | compose · 셸 스크립트 · 설정 파일만 |
@@ -85,7 +88,7 @@
 ```
 paw-trail/infra
 │
-├── docker-compose.yml              컨테이너 12개
+├── docker-compose.yml              컨테이너 13개
 ├── .env                            ⛔커밋 안 됨. 각자 만듦
 ├── .env.example                    그 목록과 설명
 │
@@ -134,7 +137,7 @@ docker run kafka ...
 docker run redis ...
         │
         ▼
-docker-compose.yml             12개를 파일 하나에 적어 두고
+docker-compose.yml             13개를 파일 하나에 적어 두고
 docker compose up -d           한 번에 띄움
                   ▲
                   └── -d : 백그라운드로. 안 붙이면 터미널이 로그에 묶임
@@ -217,6 +220,7 @@ docker compose up -d           한 번에 띄움
 | | eureka-server | 8761 | 512m | **항상** |
 | | gateway-server | 8080 | 512m | **항상** |
 | `app` | auth-service · user-service | 8081 · 8082 | 각 640m | 그 서비스를 안 고칠 때 |
+| `pipeline` | ingest-service | 8088 | 640m | ⛔수집을 돌릴 때만 |
 | `tools` | kafka-ui | **9000** | 512m | 토픽을 볼 때 |
 | `observability` | prometheus | 9090 | 512m | 지표를 볼 때 |
 | | loki | 3100 | 512m | |
@@ -468,7 +472,7 @@ docker compose --profile app up -d
 | **auth 를 고치는 중** | `infra,platform,db,tools` |
 | **auth 를 컨테이너로 띄움** | `infra,platform,db,tools,app` |
 | 대시보드·추적을 볼 때 | 위 조합 + `,observability` |
-| 수집 배치를 돌릴 때 | 위 조합 + `,pipeline` — ⚠**아직 compose 에 없음** |
+| 수집 배치를 돌릴 때 | 위 조합 + `,pipeline` |
 
 > **`.env` 는 사람마다 다른 파일입니다.** 각자 자기 방식대로 두면 됩니다.
 > auth 를 고치지 않는 팀원은 `app` 을 넣어 두는 편이 편합니다.
@@ -517,6 +521,7 @@ docker rm -f pawtrail-postgres
 ```
 8080  gateway-server     *모든 API 요청의 입구
 8081  auth-service        직접 확인할 때만
+8088  ingest-service      ⛔경로가 전부 /internal 이라 이쪽으로만 부를 수 있음
 8761  eureka-server       대시보드
 8888  config-server       설정
 9000  kafka-ui            *8080 이 아님 (게이트웨이와 겹침)
@@ -1397,11 +1402,11 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 
 | 언제 | 무엇 |
 |---|---|
-| **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth 하나) |
-| **ingest 착수 시** | EC2 PostgreSQL — 수집 데이터 공유가 필요해짐 |
-| **user · pet 이 생기면** | `scripts/seed.sh` — 테스트 데이터 시드 |
+| **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth · user) |
+| **EC2 PostgreSQL** | 수집 데이터를 공유해야 할 때. ⛔아직 각자 로컬 |
+| **pet 이 생기면** | `scripts/seed.sh` — 테스트 데이터 시드 |
 | **nginx 를 붙일 때** | `edge` 프로파일 · `nginx.conf` |
-| 수집 배치를 만들 때 | `pipeline` 프로파일 |
+| extract 를 만들 때 | `pipeline` 프로파일에 추가 |
 
 ---
 
@@ -1409,8 +1414,8 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 
 ```
 edge       nginx
-pipeline   ingest · extract
-app        도메인 서비스 13개 (auth 만 있음)
+pipeline   extract          (ingest 는 들어감)
+app        도메인 서비스 12개 (auth · user 만 있음)
 ```
 
 **해당 저장소가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가합니다.**
