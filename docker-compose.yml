@@ -432,6 +432,70 @@ services:
     networks: [pawtrail]
 
   # ---------------------------------------------------------------------------
+  # place-service
+  # ---------------------------------------------------------------------------
+  # 장소를 맡음, 여러 소스가 가리키는 같은 곳을 하나로 합쳐 들고 있음
+  #
+  # user 와 갈리는 자리가 셋임
+  #   의존이 셋      redis 를 안 씀, 캐시할 자리가 아직 없음
+  #   비밀값         카카오 로컬 API 키, 좌표가 없는 장소를 주소로 찾을 때 씀
+  #   kafka          받지 않고 보내기만 함, place.updated 를 search 가 기다림
+  #
+  # ⛔이 서비스만 outbox relay 가 켜져 있음
+  #   설정 저장소의 app.outbox.relay.enabled 가 true 임
+  #   미발행 이벤트를 회수하는 스케줄러라 두 대 이상이면 같은 행을 두 번 집음
+  #   인스턴스를 늘릴 때 한 대만 켜지도록 갈라야 함
+  place-service:
+    image: ghcr.io/paw-trail/place-service:latest
+    container_name: pawtrail-place-service
+    profiles: [app]
+    depends_on:
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      # * kafka 가 없으면 발행이 쌓이기만 하고 나가지 않음
+      #   기동은 되고 조회도 도나 장소가 바뀐 것을 아무도 모르게 됨
+      #   회수 스케줄러가 계속 실패를 쌓으므로 로그가 지저분해짐
+      kafka:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+
+      # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
+      #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
+      CONFIG_HOST: config-server
+      DB_HOST: postgres
+
+      # * 아래는 비밀값이라 .env 에서 읽음
+      #   config 는 공개 저장소라 키를 두지 않음
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY}
+    ports:
+      # 8084 를 여는 이유
+      #   게이트웨이를 거치지 않고 직접 확인할 때 씀
+      #   /internal 다섯은 게이트웨이가 라우팅하지 않아 이쪽으로만 부를 수 있음
+      #   수집 서비스가 부르는 적재도 그 경로임
+      - "8084:8084"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8084/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # 다른 서비스보다 길게 잡음
+      #   Flyway 가 여섯 개를 적용하고 PostGIS 인덱스를 만듦
+      #   빈 데이터베이스에 처음 뜰 때가 제일 오래 걸림
+      start_period: 60s
+    # Dockerfile 의 -XX:MaxRAMPercentage=70 이 이 값의 70% 까지 힙으로 씀
+    #
+    # user 와 같은 값을 둠
+    #   적재가 천 건씩 다루지만 청크로 끊어 읽으므로 한 번에 드는 양이 크지 않음
+    #   모자라면 늘릴 자리이나 지금 근거가 없음
+    mem_limit: 640m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
   # ingest-service  (pipeline 프로파일)
   # ---------------------------------------------------------------------------
   # 공공데이터를 받아 원본 그대로 raw_db 에 담음
