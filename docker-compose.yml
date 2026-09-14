@@ -432,6 +432,68 @@ services:
     networks: [pawtrail]
 
   # ---------------------------------------------------------------------------
+  # pet-service
+  # ---------------------------------------------------------------------------
+  # 반려동물을 맡음, 판정에 쓰이는 값의 소유자임
+  #
+  # user 와 갈리는 자리가 셋임
+  #   의존이 셋    redis 를 안 씀, 판정 캐시는 verdict 소유이고 견종 45행은 캐시할 크기가 아님
+  #                *템플릿에서 온 의존성 두 줄을 아예 지웠음
+  #                 place 가 쓰지도 않는 redis 때문에 상태 확인이 실패해 릴리스를 다시 했음
+  #   kafka        보내고 받는 첫 서비스임
+  #                pet.profile.updated 를 내보내고 account.withdrawn 을 받음
+  #                없으면 기동은 되나 탈퇴한 계정의 반려동물과 사진이 그대로 남음
+  #   비밀값       AWS 액세스 키 2개, 반려동물 사진을 S3 에 둠
+  #                *버킷은 user 와 같은 것을 쓰나 IAM 사용자는 따로임
+  #                 user 의 정책이 users/* 로 좁혀져 있어 키를 돌려 쓰면 업로드만 403 이 남
+  pet-service:
+    image: ghcr.io/paw-trail/pet-service:latest
+    container_name: pawtrail-pet-service
+    profiles: [app]
+    depends_on:
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      # * kafka 가 없어도 기동은 되지만 양쪽이 다 막힘
+      #   내보내는 쪽은 outbox 에 쌓이기만 하고 verdict 가 판정 캐시를 못 지움
+      #   받는 쪽은 탈퇴 정리가 아예 안 돌아 반려동물과 사진이 남음
+      #   쓰는 것은 다 적어 기동 순서가 드러나게 함
+      kafka:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+
+      # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
+      #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
+      CONFIG_HOST: config-server
+      DB_HOST: postgres
+
+      # * 아래는 비밀값이라 .env 에서 읽음
+      #   config 는 공개 저장소라 키를 두지 않음
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    ports:
+      # 8083 을 여는 이유
+      #   게이트웨이를 거치지 않고 직접 확인할 때 씀
+      #   /internal 두 개는 게이트웨이가 라우팅하지 않아 이쪽으로만 부를 수 있음
+      #   그때는 X-User-Id 헤더를 손으로 붙여야 소유권 검증을 지남
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # * place 의 60s 가 아니라 40s 임
+      #   Flyway 가 넷뿐이고 PostGIS 인덱스를 만들지 않아 처음 뜰 때도 빠름
+      start_period: 40s
+    # Dockerfile 의 -XX:MaxRAMPercentage=70 이 이 값의 70% 까지 힙으로 씀
+    mem_limit: 640m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
   # place-service
   # ---------------------------------------------------------------------------
   # 장소를 맡음, 여러 소스가 가리키는 같은 곳을 하나로 합쳐 들고 있음
@@ -441,7 +503,7 @@ services:
   #   비밀값         카카오 로컬 API 키, 좌표가 없는 장소를 주소로 찾을 때 씀
   #   kafka          받지 않고 보내기만 함, place.updated 를 search 가 기다림
   #
-  # ⛔이 서비스만 outbox relay 가 켜져 있음
+  # * outbox relay 가 켜져 있음, 이 서비스와 pet 둘뿐임
   #   설정 저장소의 app.outbox.relay.enabled 가 true 임
   #   미발행 이벤트를 회수하는 스케줄러라 두 대 이상이면 같은 행을 두 번 집음
   #   인스턴스를 늘릴 때 한 대만 켜지도록 갈라야 함

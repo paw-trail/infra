@@ -44,7 +44,9 @@
   │                  gateway-server  8080        모든 요청의 입구
   │
   ├── app            auth-service    8081        개발이 끝난 도메인 서비스
-  │                  user-service    8082        (나머지 12개는 아직)
+  │                  user-service    8082        (app 에 들어갈 12개 중 넷)
+  │                  pet-service     8083
+  │                  place-service   8084
   │
   ├── pipeline       ingest-service  8088        수집 배치
   │                                              *상시 기동이 아님
@@ -65,7 +67,7 @@
 
 | 만들려는 것 | 필요한 것 |
 |---|---|
-| `place-service` | PostgreSQL · Kafka · Redis · config-server · eureka-server · gateway-server |
+| `user-service` | PostgreSQL · Kafka · Redis · config-server · eureka-server · gateway-server |
 | 그것들을 각자 설치하면 | **버전이 갈리고 "제 컴퓨터에서는 되는데" 가 생김** |
 | 여기서 띄우면 | **명령 한 줄. 누구 컴퓨터에서든 같은 버전** |
 
@@ -219,7 +221,7 @@ docker compose up -d           한 번에 띄움
 | `platform` | config-server | 8888 | 512m | **항상** |
 | | eureka-server | 8761 | 512m | **항상** |
 | | gateway-server | 8080 | 512m | **항상** |
-| `app` | auth-service · user-service | 8081 · 8082 | 각 640m | 그 서비스를 안 고칠 때 |
+| `app` | auth-service · user-service · pet-service · place-service | 8081 · 8082 · 8083 · 8084 | 각 640m | 그 서비스를 안 고칠 때 |
 | `pipeline` | ingest-service | 8088 | 640m | ⛔수집을 돌릴 때만 |
 | `tools` | kafka-ui | **9000** | 512m | 토픽을 볼 때 |
 | `observability` | prometheus | 9090 | 512m | 지표를 볼 때 |
@@ -1402,7 +1404,7 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 
 | 언제 | 무엇 |
 |---|---|
-| **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth · user) |
+| **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth · user · pet · place) |
 | **EC2 PostgreSQL** | 수집 데이터를 공유해야 할 때. ⛔아직 각자 로컬 |
 | **pet 이 생기면** | `scripts/seed.sh` — 테스트 데이터 시드 |
 | **nginx 를 붙일 때** | `edge` 프로파일 · `nginx.conf` |
@@ -1415,7 +1417,7 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 ```
 edge       nginx
 pipeline   extract          (ingest 는 들어감)
-app        도메인 서비스 12개 (auth · user 만 있음)
+app        도메인 서비스 8개  (auth · user · pet · place 는 들어감)
 ```
 
 **해당 저장소가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가합니다.**
