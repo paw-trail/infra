@@ -633,7 +633,7 @@ docker compose exec postgres psql -U pawtrail -c "\l"
 
 ```
 verdict · congestion · route     무상태
-extract                          raw_db 를 읽고 policy 에 넘김 (자기 DB 없음)
+extract                          ingest 원문을 /internal 로 받아 policy 에 넘김 (자기 DB 없음)
 ```
 
 ---

@@ -29,7 +29,7 @@ set -euo pipefail
 #   종전에는 raw_db 를 빌려 썼는데 ingest 가 실제로 그 DB 를 채우면서
 #   템플릿을 띄우면 Flyway 가 남의 DB 에 표를 만드는 상태가 되어 분리했음
 #   verdict, congestion, route  무상태
-#   extract                     Spring Batch 메타만 쓰고 별도 DB 없음
+#   extract                     별도 DB 없음 (어디까지 했는지는 ingest 원문 상태가 맡음)
 #   gateway, eureka, config     플랫폼
 SERVICES=(
   "auth_db:auth_svc"
