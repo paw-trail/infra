@@ -22,7 +22,12 @@ set -euo pipefail
 : "${SERVICE_DB_PASSWORD:?SERVICE_DB_PASSWORD 가 필요함, .env 를 확인할 것}"
 
 # 데이터베이스:소유 계정
-# 서비스 17개 중 DB 를 소유한 10개임
+# 서비스 17개 중 DB 를 소유한 10개와, 템플릿 확인용 1개를 더해 11개임
+#
+# template_db 는 배포 대상이 아님
+#   service-template 저장소를 그대로 띄워 확인할 때 씀 (config 의 template-service.yml)
+#   종전에는 raw_db 를 빌려 썼는데 ingest 가 실제로 그 DB 를 채우면서
+#   템플릿을 띄우면 Flyway 가 남의 DB 에 표를 만드는 상태가 되어 분리했음
 #   verdict, congestion, route  무상태
 #   extract                     Spring Batch 메타만 쓰고 별도 DB 없음
 #   gateway, eureka, config     플랫폼
@@ -37,6 +42,7 @@ SERVICES=(
   "report_db:report_svc"
   "review_db:review_svc"
   "notif_db:notif_svc"
+  "template_db:template_svc"
 )
 
 for entry in "${SERVICES[@]}"; do

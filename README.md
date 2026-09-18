@@ -35,7 +35,7 @@
         ▼
   Docker 네트워크 (pawtrail)
   │
-  ├── db             postgres                    DB 10개 · 계정 10개
+  ├── db             postgres                    DB 11개 · 계정 11개
   │
   ├── infra          kafka · redis               *거의 항상 켜 둠
   │
@@ -96,7 +96,7 @@ paw-trail/infra
 ├── .env.example                    그 목록과 설명
 │
 ├── init-db/
-│   ├── 01-databases.sh             DB 10개 · 계정 10개 · 권한
+│   ├── 01-databases.sh             DB 11개 · 계정 11개 · 권한
 │   └── 02-extensions.sh            PostGIS · pg_trgm
 │
 ├── kafka/create-topics.sh          토픽 12개
@@ -286,7 +286,7 @@ cd infra
 ③ docker compose up -d                    .env 의 COMPOSE_PROFILES 조합대로
         │
         ├──▶  postgres 가 처음 뜰 때 init-db 스크립트가 돎
-        │       DB 10개 · 계정 10개 · PostGIS · pg_trgm
+        │       DB 11개 · 계정 11개 · PostGIS · pg_trgm
         │
         ▼
 ④ docker compose ps                       전부 (healthy) 인지
@@ -323,7 +323,7 @@ copy .env.example .env
 | `COMPOSE_PROFILES` | `infra,platform,db,tools` | ✓ |
 | `POSTGRES_USER` | `pawtrail` | ✓ |
 | `POSTGRES_PASSWORD` | 아무 값 | ✓ |
-| `SERVICE_DB_PASSWORD` | 아무 값 — **서비스 계정 10개가 공유** | ✓ |
+| `SERVICE_DB_PASSWORD` | 아무 값 — **서비스 계정이 모두 공유** | ✓ |
 | `GRAFANA_USER` · `GRAFANA_PASSWORD` | 아무 값 | ✓ |
 | `AUTH_JWT_PRIVATE_KEY_B64` | 팀장에게 받음 | `app` 켤 때만 |
 | `AUTH_MAIL_PASSWORD` | 팀장에게 받음 | `app` 켤 때만 |
@@ -576,17 +576,36 @@ docker rm -f pawtrail-postgres
 
 ---
 
-### 4-2. 데이터베이스 10개
+### 4-2. 데이터베이스 11개
 
 ```
 postgres 컨테이너 하나
 │
-├── auth_db      auth_svc          user_db    user_svc
-├── pet_db       pet_svc           place_db   place_svc
-├── policy_db    policy_svc        search_db  search_svc
-├── raw_db       ingest_svc        report_db  report_svc
-└── review_db    review_svc        notif_db   notif_svc
+├── auth_db      auth_svc          user_db      user_svc
+├── pet_db       pet_svc           place_db     place_svc
+├── policy_db    policy_svc        search_db    search_svc
+├── raw_db       ingest_svc        report_db    report_svc
+├── review_db    review_svc        notif_db     notif_svc
+└── template_db  template_svc      *배포 대상이 아님
 ```
+
+> **`template_db` 는 `service-template` 을 그대로 띄워 확인할 때만 씁니다.**
+> 종전에는 `raw_db` 를 빌려 썼는데, `ingest` 가 실제로 그 DB 를 채우면서
+> **템플릿을 띄우면 Flyway 가 남의 DB 에 표를 만드는 상태**가 되어 분리했습니다.
+>
+> ⚠ **이미 볼륨이 있는 사람은 자동으로 안 생깁니다.** init 스크립트는 처음 기동할 때만
+> 돌기 때문이며, 아래 둘 중 하나를 합니다.
+>
+> ```bash
+> # 손으로 하나만 만들기
+> docker compose exec postgres psql -U pawtrail -c "CREATE DATABASE template_db;"
+> docker compose exec postgres psql -U pawtrail -c "CREATE USER template_svc WITH PASSWORD '<.env 의 SERVICE_DB_PASSWORD>';"
+> docker compose exec postgres psql -U pawtrail -c "REVOKE CONNECT ON DATABASE template_db FROM PUBLIC;"
+> docker compose exec postgres psql -U pawtrail -c "GRANT ALL PRIVILEGES ON DATABASE template_db TO template_svc;"
+>
+> # 또는 볼륨째 새로 (⛔데이터가 전부 사라집니다)
+> docker compose down -v && docker compose up -d
+> ```
 
 **계정이 자기 DB 에만 붙을 수 있습니다.**
 
@@ -745,7 +764,7 @@ docker compose --profile db down -v
 docker compose up -d
 ```
 
-**`-v` 가 볼륨을 지웁니다.** 그러면 init 스크립트가 다시 돌아 **DB 10개가 새로
+**`-v` 가 볼륨을 지웁니다.** 그러면 init 스크립트가 다시 돌아 **DB 11개가 새로
 만들어집니다.**
 
 <br><br>
@@ -902,14 +921,15 @@ local 프로파일   →  host.docker.internal 로 유레카에 등록
 **EC2 PostgreSQL 을 아직 세우지 않았습니다.**
 
 ```
-auth · user · pet 은 공유할 데이터가 없음
+계정 · 프로필 · 반려동물은 공유할 데이터가 없음
         │
         └── 오히려 공유하면 서로의 테스트 계정이 섞여 성가심
 
-EC2 가 필요해지는 것은 ingest 착수 시점
+EC2 가 필요해지는 것은 수집 데이터를 함께 봐야 할 때
         │
-        └── 수집 데이터 4,600건을 공유해야 하고
-              공공 API 쿼터가 하루 1,000건이라 각자 채울 수 없음
+        └── ingest 가 이미 장소 19,501건과 원문 17,471건을 채웠고
+              공공 API 쿼터가 하루 1,000건이라 각자 다시 채울 수 없음
+              지금은 각자 로컬에 담아 두고 쓰는 중임
 ```
 
 > ⚠ **DB 를 공유하면 위험합니다.** 한쪽이 Flyway 스크립트를 추가하면
@@ -1085,8 +1105,18 @@ GitHub 조직 → Packages → 해당 패키지 → Package settings
 **아키텍처별 레이어가 각각 1초 안에 끝납니다.** `Dockerfile` 이 jar 를 복사하는
 것뿐이라 다른 아키텍처를 흉내내어 명령을 실행할 일이 없습니다.
 
-> **`exporting manifest list` 가 나와야 멀티아치입니다.** 이 줄이 없으면
-> 아키텍처가 하나뿐인 이미지입니다.
+> ⛔ **`exporting manifest list` 만 보고 판단하지 않습니다.** 빌더가 containerd
+> 저장소를 쓰면 **한 아키텍처만 구워도 빌드 증명 때문에 이 줄이 찍힙니다.**
+>
+> 판정은 둘 중 하나로 합니다.
+>
+> ```
+> 빌드 로그   [linux/amd64 …] 와 [linux/arm64 …] 줄이 둘 다 있는지
+> 올린 뒤     docker buildx imagetools inspect <이미지>
+>              MediaType 이 application/vnd.oci.image.index.v1+json 이고
+>              Platform 에 linux/amd64 와 linux/arm64 가 둘 다 있으면 멀티아치
+>              unknown/unknown 두 줄은 빌드 증명이라 정상입니다
+> ```
 
 **베이스 이미지가 같아 실제로 올라가는 것은 우리 jar 하나뿐입니다.** 같은 층은
 다시 올리지 않고 다른 저장소의 것을 가져다 씁니다.
@@ -1222,8 +1252,8 @@ docker compose up -d
 계정과 DB 가 실제로 있는지는 이렇게 봅니다.
 
 ```bash
-docker exec -it pawtrail-postgres psql -U pawtrail -c "\du"   # 계정 10개
-docker exec -it pawtrail-postgres psql -U pawtrail -c "\l"    # DB 10개
+docker exec -it pawtrail-postgres psql -U pawtrail -c "\du"   # 계정 11개
+docker exec -it pawtrail-postgres psql -U pawtrail -c "\l"    # DB 11개
 ```
 
 <br><br>
@@ -1407,7 +1437,7 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 |---|---|
 | **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth · user · pet · place · policy) |
 | **EC2 PostgreSQL** | 수집 데이터를 공유해야 할 때. ⛔아직 각자 로컬 |
-| **pet 이 생기면** | `scripts/seed.sh` — 테스트 데이터 시드 |
+| **지금 만들 수 있음** | `scripts/seed.sh` · `seed.ps1` — 테스트 데이터 시드. `pet` 까지 나와 계정 · 프로필 · 반려동물을 한 번에 채울 수 있음 |
 | **nginx 를 붙일 때** | `edge` 프로파일 · `nginx.conf` |
 | extract 를 만들 때 | `pipeline` 프로파일에 추가 |
 
