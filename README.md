@@ -44,11 +44,12 @@
   │                  gateway-server  8080        모든 요청의 입구
   │
   ├── app            auth-service    8081        개발이 끝난 도메인 서비스
-  │                  user-service    8082        (app 에 들어갈 12개 중 6개)
+  │                  user-service    8082        (app 에 들어갈 12개 중 7개)
   │                  pet-service     8083
   │                  place-service   8084
   │                  policy-service  8085
   │                  verdict-service 8086
+  │                  search-service  8087
   │
   ├── pipeline       ingest-service  8088        수집 배치
   │                  extract-service 8089        조건 추출 배치
@@ -226,6 +227,7 @@ docker compose up -d           한 번에 띄움
 | | gateway-server | 8080 | 512m | **항상** |
 | `app` | auth-service · user-service · pet-service · place-service · policy-service | 8081 · 8082 · 8083 · 8084 · 8085 | 각 640m | 그 서비스를 안 고칠 때 |
 | | verdict-service | 8086 | 512m | 그 서비스를 안 고칠 때 |
+| | search-service | 8087 | 640m | 그 서비스를 안 고칠 때 |
 | `pipeline` | ingest-service | 8088 | 640m | ⛔수집을 돌릴 때만 |
 | | extract-service | 8089 | 512m | ⛔조건을 뽑을 때만 |
 | `tools` | kafka-ui | **9000** | 512m | 토픽을 볼 때 |
@@ -1440,7 +1442,7 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 
 | 언제 | 무엇 |
 |---|---|
-| **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth · user · pet · place · policy) |
+| **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth · user · pet · place · policy · verdict · search) |
 | **EC2 PostgreSQL** | 수집 데이터를 공유해야 할 때. ⛔아직 각자 로컬 |
 | **지금 만들 수 있음** | `scripts/seed.sh` · `seed.ps1` — 테스트 데이터 시드. `pet` 까지 나와 계정 · 프로필 · 반려동물을 한 번에 채울 수 있음 |
 | **nginx 를 붙일 때** | `edge` 프로파일 · `nginx.conf` |
@@ -1451,7 +1453,7 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 
 ```
 edge       nginx
-app        도메인 서비스 6개  (auth · user · pet · place · policy · verdict 는 들어감)
+app        도메인 서비스 5개  (auth · user · pet · place · policy · verdict · search 는 들어감)
 ```
 
 **해당 저장소가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가합니다.**
