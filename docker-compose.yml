@@ -659,6 +659,59 @@ services:
     networks: [pawtrail]
 
   # ---------------------------------------------------------------------------
+  # search-service
+  # ---------------------------------------------------------------------------
+  # 검색을 맡음, place 의 장소를 옮겨 담은 색인으로 답함
+  #
+  # 의존은 user 와 같은 넷이나 쓰는 자리가 다름
+  #   kafka        place.updated 를 받아 place 에서 다시 읽어 색인을 덮어씀
+  #   redis        인기 급상승 순위와 재색인 잠금이 여기 있음
+  #   비밀값       DB 비밀번호뿐임
+  #   부르는 곳    place · verdict · review 를 lb:// 로 부름
+  #                요청이나 이벤트를 받은 뒤에야 찾으므로 기동 순서와는 무관함
+  search-service:
+    image: ghcr.io/paw-trail/search-service:latest
+    container_name: pawtrail-search-service
+    profiles: [app]
+    depends_on:
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      # * 쓰는 것은 다 적어 두어 기동 순서가 드러나게 함 (user 와 같음)
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+
+      # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
+      #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
+      CONFIG_HOST: config-server
+      DB_HOST: postgres
+
+      # * 비밀값이라 .env 에서 읽음
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+    ports:
+      # 8087 을 여는 이유
+      #   게이트웨이를 거치지 않고 직접 확인할 때 씀
+      #   * IntelliJ 로 search 를 띄워 둔 채 이 컨테이너를 올리면 포트가 겹침
+      - "8087:8087"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8087/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # 처음 뜰 때 V20 이 트라이그램 · 좌표 인덱스를 만들어 place 와 같게 둠
+      start_period: 60s
+    # Dockerfile 의 -XX:MaxRAMPercentage=70 이 이 값의 70% 까지 힙으로 씀
+    # 전량 재색인도 place 500곳씩 받아 넣고 버리므로 한 번에 드는 양이 크지 않음
+    mem_limit: 640m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
   # ingest-service  (pipeline 프로파일)
   # ---------------------------------------------------------------------------
   # 공공데이터를 받아 원본 그대로 raw_db 에 담음
