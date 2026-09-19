@@ -613,6 +613,52 @@ services:
     networks: [pawtrail]
 
   # ---------------------------------------------------------------------------
+  # verdict-service
+  # ---------------------------------------------------------------------------
+  # 장소마다 · 반려동물마다 동반 가능 여부를 판정함
+  # 조건은 policy 에서, 반려동물은 pet 에서 받아 부를 때마다 새로 계산함
+  #
+  # policy 와 갈리는 자리가 3개임
+  #   의존이 1개   config-server 뿐임, DB 가 없고 redis · kafka 도 아직 안 씀
+  #                판정 캐시와 그것을 지우는 이벤트(policy.changed · pet.profile.updated)는 부하를 잰 뒤에 붙임
+  #   비밀값       없음
+  #   부르는 곳    pet · policy 를 lb:// 로 부름, 둘 중 하나라도 못 부르면 판정이 502 로 실패함
+  #                기동 순서와는 무관함, 요청을 받은 뒤에야 찾기 때문
+  verdict-service:
+    image: ghcr.io/paw-trail/verdict-service:latest
+    container_name: pawtrail-verdict-service
+    profiles: [app]
+    depends_on:
+      config-server:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+
+      # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
+      #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
+      CONFIG_HOST: config-server
+    ports:
+      # 8086 을 여는 이유
+      #   게이트웨이를 거치지 않고 직접 확인할 때 씀
+      #   목록 판정(/internal/verdicts/batch)은 게이트웨이가 라우팅하지 않아 이쪽으로만 부를 수 있음
+      #   * IntelliJ 로 verdict 를 띄워 둔 채 이 컨테이너를 올리면 포트가 겹침
+      - "8086:8086"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8086/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # DB 도 Flyway 도 없어 빨리 뜸
+      start_period: 40s
+    # Dockerfile 의 -XX:MaxRAMPercentage=70 이 이 값의 70% 까지 힙으로 씀
+    #
+    # 한 요청에 드는 양이 가장 큰 것은 목록 판정 500곳 × 100마리임
+    # 이유 줄을 싣지 않는 목록이라 판정 값 5만 개 안팎이고, 캐시가 없어 요청이 끝나면 비워짐
+    mem_limit: 512m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
   # ingest-service  (pipeline 프로파일)
   # ---------------------------------------------------------------------------
   # 공공데이터를 받아 원본 그대로 raw_db 에 담음
