@@ -102,6 +102,11 @@ scrape_configs:
           application: extract-service
 
       - targets:
+          - "host.docker.internal:8092"
+        labels:
+          application: report-service
+
+      - targets:
           - "host.docker.internal:8095"
         labels:
           application: template-service
