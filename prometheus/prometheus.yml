@@ -107,6 +107,11 @@ scrape_configs:
           application: report-service
 
       - targets:
+          - "host.docker.internal:8093"
+        labels:
+          application: notification-service
+
+      - targets:
           - "host.docker.internal:8095"
         labels:
           application: template-service
