@@ -50,6 +50,7 @@
   │                  policy-service  8085
   │
   ├── pipeline       ingest-service  8088        수집 배치
+  │                  extract-service 8089        조건 추출 배치
   │                                              *상시 기동이 아님
   │
   ├── tools          kafka-ui        9000        토픽·메시지 보기
@@ -224,6 +225,7 @@ docker compose up -d           한 번에 띄움
 | | gateway-server | 8080 | 512m | **항상** |
 | `app` | auth-service · user-service · pet-service · place-service · policy-service | 8081 · 8082 · 8083 · 8084 · 8085 | 각 640m | 그 서비스를 안 고칠 때 |
 | `pipeline` | ingest-service | 8088 | 640m | ⛔수집을 돌릴 때만 |
+| | extract-service | 8089 | 512m | ⛔조건을 뽑을 때만 |
 | `tools` | kafka-ui | **9000** | 512m | 토픽을 볼 때 |
 | `observability` | prometheus | 9090 | 512m | 지표를 볼 때 |
 | | loki | 3100 | 512m | |
@@ -330,7 +332,7 @@ copy .env.example .env
 | `AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | 팀장에게 받음 | `app` 켤 때만 |
 | `AWS_ACCESS_KEY_ID` | 팀장에게 받음 | `app` 켤 때만 |
 | `AWS_SECRET_ACCESS_KEY` | 팀장에게 받음 | `app` 켤 때만 |
-| `OPENAI_API_KEY` | 팀장에게 받음 | `app` 켤 때만 |
+| `OPENAI_API_KEY` | 팀장에게 받음 | `app` · `pipeline` 켤 때만 |
 
 > ⛔ **`.env` 는 커밋되지 않습니다.** `.gitignore` 에 있습니다.
 > **비밀값을 `.env.example` 에 적지 않습니다.**
@@ -475,7 +477,7 @@ docker compose --profile app up -d
 | **auth 를 고치는 중** | `infra,platform,db,tools` |
 | **auth 를 컨테이너로 띄움** | `infra,platform,db,tools,app` |
 | 대시보드·추적을 볼 때 | 위 조합 + `,observability` |
-| 수집 배치를 돌릴 때 | 위 조합 + `,pipeline` |
+| 수집 · 조건 추출 배치를 돌릴 때 | 위 조합 + `,pipeline` |
 
 > **`.env` 는 사람마다 다른 파일입니다.** 각자 자기 방식대로 두면 됩니다.
 > auth 를 고치지 않는 팀원은 `app` 을 넣어 두는 편이 편합니다.
@@ -525,6 +527,7 @@ docker rm -f pawtrail-postgres
 8080  gateway-server     *모든 API 요청의 입구
 8081  auth-service        직접 확인할 때만
 8088  ingest-service      ⛔경로가 전부 /internal 이라 이쪽으로만 부를 수 있음
+8089  extract-service     ⛔경로가 전부 /internal 이라 이쪽으로만 부를 수 있음
 8761  eureka-server       대시보드
 8888  config-server       설정
 9000  kafka-ui            *8080 이 아님 (게이트웨이와 겹침)
@@ -1439,7 +1442,6 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 | **EC2 PostgreSQL** | 수집 데이터를 공유해야 할 때. ⛔아직 각자 로컬 |
 | **지금 만들 수 있음** | `scripts/seed.sh` · `seed.ps1` — 테스트 데이터 시드. `pet` 까지 나와 계정 · 프로필 · 반려동물을 한 번에 채울 수 있음 |
 | **nginx 를 붙일 때** | `edge` 프로파일 · `nginx.conf` |
-| extract 를 만들 때 | `pipeline` 프로파일에 추가 |
 
 ---
 
@@ -1447,7 +1449,6 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 
 ```
 edge       nginx
-pipeline   extract          (ingest 는 들어감)
 app        도메인 서비스 7개  (auth · user · pet · place · policy 는 들어감)
 ```
 

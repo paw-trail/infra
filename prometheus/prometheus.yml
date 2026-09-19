@@ -87,6 +87,11 @@ scrape_configs:
           application: ingest-service
 
       - targets:
+          - "host.docker.internal:8089"
+        labels:
+          application: extract-service
+
+      - targets:
           - "host.docker.internal:8095"
         labels:
           application: template-service
