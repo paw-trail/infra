@@ -44,7 +44,7 @@
   │                  gateway-server       8080        모든 요청의 입구
   │
   ├── app            auth-service         8081        개발이 끝난 도메인 서비스
-  │                  user-service         8082        (app 에 들어갈 12개 중 9개)
+  │                  user-service         8082        (app 에 들어갈 11개 중 9개)
   │                  pet-service          8083
   │                  place-service        8084
   │                  policy-service       8085
@@ -576,8 +576,8 @@ docker rm -f pawtrail-postgres
 | 8087 | search |
 | 8088 | ingest |
 | 8089 | extract |
-| 8090 | congestion |
-| 8091 | route |
+| 8090 | weather |
+| 8091 | (비움) |
 | 8092 | report |
 | 8093 | notification |
 | 8094 | review |
@@ -643,7 +643,7 @@ docker compose exec postgres psql -U pawtrail -c "\l"
 **DB 가 없는 서비스도 있습니다.**
 
 ```
-verdict · congestion · route     무상태
+verdict · weather                무상태 (weather 는 Redis 캐시만 씀)
 extract                          ingest 원문을 /internal 로 받아 policy 에 넘김 (자기 DB 없음)
 ```
 
@@ -653,7 +653,7 @@ extract                          ingest 원문을 /internal 로 받아 policy �
 
 | 확장 | 왜 |
 |---|---|
-| `postgis` | 좌표 · 거리 검색 (place · search · route) |
+| `postgis` | 좌표 · 거리 검색 (place · search) |
 | `pg_trgm` | 오타·부분일치 검색 |
 
 > **PostGIS 는 신뢰 확장이 아니라 `CREATE EXTENSION` 에 슈퍼유저가 필요합니다.**
