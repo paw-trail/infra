@@ -822,6 +822,56 @@ services:
     networks: [pawtrail]
 
   # ---------------------------------------------------------------------------
+  # weather-service
+  # ---------------------------------------------------------------------------
+  # 지역 날씨를 맡음, 좌표 · 지역을 기상청 단기예보 격자로 바꿔 지금 날씨와 오늘 비를 돌려줌
+  #
+  # verdict 와 갈리는 자리가 3개임
+  #   의존이 2개   config-server · redis 뿐임, DB · kafka 는 안 씀
+  #                redis 에 격자 · 발표마다 예보를 7시간 담아 둠 (못 닿아도 기상청을 직접 불러 답함)
+  #   비밀값       공공데이터포털 인증키 하나, ingest 와 같은 계정 키라 값이 같음
+  #   부르는 곳    바깥 기상청 하나뿐임, 다른 서비스는 부르지 않음
+  #
+  # * TZ 가 Asia/Seoul 이어야 함
+  #   발표 시각을 컨테이너의 기본 시간대로 세는데 기상청 발표 시각이 한국 시각임
+  weather-service:
+    image: ghcr.io/paw-trail/weather-service:latest
+    container_name: pawtrail-weather-service
+    profiles: [app]
+    depends_on:
+      config-server:
+        condition: service_healthy
+      # * 없어도 답은 하지만 요청마다 기상청을 부름
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+
+      # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
+      #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
+      CONFIG_HOST: config-server
+
+      # * 비밀값이라 .env 에서 읽음, 비어 있으면 기동에 실패함
+      WEATHER_PUBLIC_DATA_SERVICE_KEY: ${WEATHER_PUBLIC_DATA_SERVICE_KEY}
+    ports:
+      # 8090 을 여는 이유
+      #   게이트웨이를 거치지 않고 health · 차단기 지표(/actuator/prometheus)를 볼 때 씀
+      #   * IntelliJ 로 weather 를 띄워 둔 채 이 컨테이너를 올리면 포트가 겹침
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8090/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # DB 도 Flyway 도 없어 빨리 뜸 (verdict 와 같음)
+      start_period: 40s
+    # Dockerfile 의 -XX:MaxRAMPercentage=70 이 이 값의 70% 까지 힙으로 씀
+    # 한 요청에 드는 양은 발표 하나(천 행 안팎)를 읽어 시각별로 모으는 정도라 verdict 와 같은 값임
+    mem_limit: 512m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
   # ingest-service  (pipeline 프로파일)
   # ---------------------------------------------------------------------------
   # 공공데이터를 받아 원본 그대로 raw_db 에 담음
