@@ -876,10 +876,14 @@ services:
   # ---------------------------------------------------------------------------
   # 공공데이터를 받아 원본 그대로 raw_db 에 담음
   #
-  # app 이 아니라 pipeline 인 이유
-  #   상시 기동이 아님, 화면이 없고 배치라 Jenkins 잡이 부를 때만 돎
-  #   app 에 두면 --profile app 으로 올릴 때 배치가 같이 뜸
-  #   ⚠배포 노드는 별개 축임, 그쪽에는 pipeline 이라는 노드가 없어 app 에 올라감
+  # 로컬에서 app 이 아니라 pipeline 인 이유
+  #   예약 수집이 꺼져 있어 띄워 두어도 스스로 하는 일이 없음
+  #   수집을 부르거나 관리자 수집 카드 · 원문보기를 볼 때만 함께 띄우면 됨
+  #   app 에 두면 --profile app 으로 올릴 때마다 같이 뜸
+  #
+  # 배포에서는 늘 떠 있어야 함
+  #   관리자 버튼 · 매일 04:00 예약 · 장소 상세의 원문보기가 이 서비스를 부름
+  #   배포 노드는 별개 축이라 pipeline 이라는 노드가 없어 app 에 올라감
   #
   # auth·user 와 갈리는 자리가 넷임
   #   의존이 둘      config-server · postgres 뿐임
@@ -911,10 +915,17 @@ services:
       #   config 는 공개 저장소라 키를 두지 않음
       SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD}
       INGEST_PUBLIC_DATA_SERVICE_KEY: ${INGEST_PUBLIC_DATA_SERVICE_KEY}
+
+      # * 매일 예약 수집의 켜기 스위치임
+      #   비밀값은 아니지만 자리마다 값이 달라 .env 에서 읽음, 배포 서버에서만 true 로 둠
+      #   .env 에 없으면 false 로 채움
+      #   비운 채 넘기면 스프링이 빈 값을 읽어 기본값을 쓰지 않으므로 기동이 깨질 수 있음
+      #   켜졌는지는 ingest 기동 로그의 「예약 수집 켜짐 · 꺼짐」 한 줄로 봄
+      INGEST_SCHEDULE_ENABLED: ${INGEST_SCHEDULE_ENABLED:-false}
     ports:
       # 8088 을 여는 이유
-      #   경로가 전부 /internal 이라 게이트웨이가 라우팅하지 않음
-      #   수집을 부르는 것도 결과를 보는 것도 이쪽으로만 됨
+      #   게이트웨이를 거치는 것은 관리자 수집 입구 둘뿐임
+      #   전량 · 넘기기 · 바로 보내기와 전체 실행 이력은 /internal 이라 이쪽으로만 부름
       - "8088:8088"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8088/actuator/health"]
@@ -1020,15 +1031,34 @@ services:
   # ---------------------------------------------------------------------------
   # 저장소는 기본값인 인메모리를 씀
   # 로컬에서 지난 트레이스를 다시 볼 일이 없고 컨테이너가 자주 재생성되므로 볼륨이 의미가 없음
+  #
+  # 힙과 스팬 상한을 직접 정함
+  #   이미지의 기동 스크립트는 JAVA_OPTS 가 비어 있으면 힙을 160m 로 고정함
+  #   mem_limit 을 올려도 힙은 그대로이고, 그 힙이 스팬 5만 개 남짓에서 가득 차
+  #   Java heap space 로 죽었음
+  #
+  #   실측으로 스팬 하나가 힙을 약 2KB 씀
+  #   상한 10만 개면 약 200MB 로 힙 512m 의 40% 쯤이고, 넘으면 오래된 트레이스부터 지워짐
+  #   기본값 50만 개를 그대로 두면 힙이 1GB 는 있어야 함
+  #
+  #   거의 쉬는 상태에서도 분당 660 개쯤 들어와 10만 개가 약 2시간 반 치임
+  #   로컬에서 zipkin 을 여는 건 방금 느렸던 요청을 따라갈 때라 이 정도면 충분함
+  #
+  #   JAVA_OPTS 를 주면 기본값이 통째로 바뀌므로 ExitOnOutOfMemoryError 도 다시 적음
+  #   힙이 차면 반쯤 살아 있지 않고 바로 끝나 docker ps 에서 드러나게 하려는 것임
+  #
+  # mem_limit 1g 는 힙 512m 에 메타스페이스 · 스레드 · 네트워크 버퍼 몫을 더한 값임
   zipkin:
     image: openzipkin/zipkin:latest
     container_name: pawtrail-zipkin
     profiles: [observability]
     environment:
       TZ: Asia/Seoul
+      JAVA_OPTS: "-Xms512m -Xmx512m -XX:+ExitOnOutOfMemoryError"
+      MEM_MAX_SPANS: "100000"
     ports:
       - "9411:9411"
-    mem_limit: 512m
+    mem_limit: 1g
     networks: [pawtrail]
 
   # ---------------------------------------------------------------------------

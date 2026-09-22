@@ -234,12 +234,12 @@ docker compose up -d           한 번에 띄움
 | | weather-service | 8090 | 512m | 그 서비스를 안 고칠 때 |
 | | report-service | 8092 | 640m | 그 서비스를 안 고칠 때 |
 | | notification-service | 8093 | 640m | 그 서비스를 안 고칠 때 |
-| `pipeline` | ingest-service | 8088 | 640m | ⛔수집을 돌릴 때만 |
+| `pipeline` | ingest-service | 8088 | 640m | ⛔수집을 부르거나 관리자 수집 카드 · 원문보기를 볼 때 |
 | | extract-service | 8089 | 512m | ⛔조건을 뽑을 때만 |
 | `tools` | kafka-ui | **9000** | 512m | 토픽을 볼 때 |
 | `observability` | prometheus | 9090 | 512m | 지표를 볼 때 |
 | | loki | 3100 | 512m | |
-| | zipkin | 9411 | 512m | |
+| | zipkin | 9411 | 1g | |
 | | grafana | 3000 | 512m | |
 
 > **Kafka UI 가 9000 인 이유** — 원래 8080 인데 **게이트웨이와 겹칩니다.**
@@ -260,7 +260,7 @@ Settings → Resources → Memory
 |---|---|
 | `infra,platform,db,tools` | 약 4.2G |
 | `+ app` (auth) | 약 4.8G |
-| `+ observability` | 약 6.8G |
+| `+ observability` | 약 7.3G |
 
 > **16GB 머신이면 관측 스택은 필요할 때만 켭니다.**
 > macOS 4.5G + 컨테이너 + Docker VM 0.5G 를 대략 잡으면 그렇습니다.
@@ -536,7 +536,7 @@ docker rm -f pawtrail-postgres
 ```
 8080  gateway-server     *모든 API 요청의 입구
 8081  auth-service        직접 확인할 때만
-8088  ingest-service      ⛔경로가 전부 /internal 이라 이쪽으로만 부를 수 있음
+8088  ingest-service      ⛔관리자 입구 둘만 게이트웨이로, 나머지 /internal 은 이쪽으로만
 8089  extract-service     ⛔경로가 전부 /internal 이라 이쪽으로만 부를 수 있음
 8761  eureka-server       대시보드
 8888  config-server       설정
