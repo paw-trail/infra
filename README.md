@@ -340,9 +340,15 @@ copy .env.example .env
 | `AUTH_JWT_PRIVATE_KEY_B64` | 팀장에게 받음 | `app` 켤 때만 |
 | `AUTH_MAIL_PASSWORD` | 팀장에게 받음 | `app` 켤 때만 |
 | `AUTH_OAUTH_GOOGLE_CLIENT_SECRET` | 팀장에게 받음 | `app` 켤 때만 |
-| `AWS_ACCESS_KEY_ID` | 팀장에게 받음 | `app` 켤 때만 |
+| `AWS_ACCESS_KEY_ID` | 팀장에게 받음 — IAM 사용자 `pawtrail-user-service` 의 키 (user 용) | `app` 켤 때만 |
 | `AWS_SECRET_ACCESS_KEY` | 팀장에게 받음 | `app` 켤 때만 |
+| `PET_AWS_ACCESS_KEY_ID` | 팀장에게 받음 — IAM 사용자 `pawtrail-pet-service` 의 키 (pet 용) | `app` 켤 때만 |
+| `PET_AWS_SECRET_ACCESS_KEY` | 팀장에게 받음 | `app` 켤 때만 |
 | `OPENAI_API_KEY` | 팀장에게 받음 | `app` · `pipeline` 켤 때만 |
+
+> **AWS 키는 서비스마다 다릅니다.** user 는 `AWS_*`, pet 은 `PET_AWS_*` 를 씁니다.
+> 버킷은 같지만 IAM 사용자의 권한이 `users/*` 와 `pets/*` 로 나뉘어 있어,
+> pet 에 user 의 키를 넣으면 주소 발급은 되는데 실제 업로드만 403 이 납니다.
 
 > ⛔ **`.env` 는 커밋되지 않습니다.** `.gitignore` 에 있습니다.
 > **비밀값을 `.env.example` 에 적지 않습니다.**

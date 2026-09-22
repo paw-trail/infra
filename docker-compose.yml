@@ -444,8 +444,9 @@ services:
   #                pet.profile.updated 를 내보내고 account.withdrawn 을 받음
   #                없으면 기동은 되나 탈퇴한 계정의 반려동물과 사진이 그대로 남음
   #   비밀값       AWS 액세스 키 2개, 반려동물 사진을 S3 에 둠
-  #                *버킷은 user 와 같은 것을 쓰나 IAM 사용자는 따로임
+  #                *버킷은 user 와 같은 것을 쓰나 IAM 사용자는 따로임 (pawtrail-pet-service)
   #                 user 의 정책이 users/* 로 좁혀져 있어 키를 돌려 쓰면 업로드만 403 이 남
+  #                 그래서 .env 에서는 PET_AWS_* 라는 따로 된 이름으로 읽음
   pet-service:
     image: ghcr.io/paw-trail/pet-service:latest
     container_name: pawtrail-pet-service
@@ -473,8 +474,13 @@ services:
       # * 아래는 비밀값이라 .env 에서 읽음
       #   config 는 공개 저장소라 키를 두지 않음
       SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+
+      # * .env 의 이름과 컨테이너 안의 이름이 다름
+      #   바깥은 PET_AWS_* — user 의 AWS_* 와 겹치지 않게 서비스 이름을 앞에 붙임
+      #   안쪽은 AWS_* 그대로 — SDK 의 DefaultCredentialsProvider 가 이 이름만 읽음
+      #   바깥까지 AWS_* 로 두면 user 의 키가 들어와 서명은 되는데 업로드만 403 이 남
+      AWS_ACCESS_KEY_ID: ${PET_AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${PET_AWS_SECRET_ACCESS_KEY}
     ports:
       # 8083 을 여는 이유
       #   게이트웨이를 거치지 않고 직접 확인할 때 씀
