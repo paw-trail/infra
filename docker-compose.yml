@@ -878,6 +878,64 @@ services:
     networks: [pawtrail]
 
   # ---------------------------------------------------------------------------
+  # review-service
+  # ---------------------------------------------------------------------------
+  #   하는 일      후기 · 별점 3문항 · 사진 · 반려동물 여러 마리
+  #   부르는 곳    pet · place · user 를 lb:// 로 부름
+  #   받는 곳      user · place · search 가 /internal/reviews 를 부름
+  # ---------------------------------------------------------------------------
+  review-service:
+    image: ghcr.io/paw-trail/review-service:latest
+    container_name: pawtrail-review-service
+    profiles: [app]
+    depends_on:
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      # * kafka 가 없어도 기동은 되지만 탈퇴 정리가 아예 안 돌아
+      #   탈퇴한 사람의 후기와 사진이 남음
+      #   내보내는 이벤트는 없으므로 막히는 것은 받는 쪽뿐임
+      kafka:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Seoul
+      SPRING_PROFILES_ACTIVE: dev
+
+      # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
+      #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
+      CONFIG_HOST: config-server
+      DB_HOST: postgres
+
+      # * 아래는 비밀값이라 .env 에서 읽음
+      #   config 는 공개 저장소라 키를 두지 않음
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD}
+
+      # * .env 의 이름과 컨테이너 안의 이름이 다름
+      #   바깥은 REVIEW_AWS_* — user 의 AWS_* 와 겹치지 않게 서비스 이름을 앞에 붙임
+      #   안쪽은 AWS_* 그대로 — SDK 의 DefaultCredentialsProvider 가 이 이름만 읽음
+      #   pet 이 이 자리에서 user 키를 물려받아 업로드만 403 이 났었음
+      AWS_ACCESS_KEY_ID: ${REVIEW_AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${REVIEW_AWS_SECRET_ACCESS_KEY}
+    ports:
+      # 8094 를 여는 이유
+      #   게이트웨이를 거치지 않고 직접 확인할 때 씀
+      #   /internal 세 개는 게이트웨이가 라우팅하지 않아 이쪽으로만 부를 수 있음
+      #   그때는 X-User-Id 헤더를 손으로 붙여야 계정 확인을 지남
+      - "8094:8094"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8094/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # * place 의 60s 가 아니라 40s 임
+      #   Flyway 가 둘뿐이고 PostGIS 인덱스를 만들지 않아 처음 뜰 때도 빠름
+      start_period: 40s
+    # Dockerfile 의 -XX:MaxRAMPercentage=70 이 이 값의 70% 까지 힙으로 씀
+    mem_limit: 640m
+    networks: [pawtrail]
+
+  # ---------------------------------------------------------------------------
   # ingest-service  (pipeline 프로파일)
   # ---------------------------------------------------------------------------
   # 공공데이터를 받아 원본 그대로 raw_db 에 담음
@@ -1109,6 +1167,8 @@ volumes:
   # 검증 중에는 매번 깨끗한 상태로 시작하는 편이 낫고 토픽 생성 스크립트가 멱등하므로
   # down 으로 데이터가 사라져도 재실행 한 번이면 복구됨
   # 영속이 필요해지면 그때 권한과 함께 잡을 것
+
+
 
 networks:
   pawtrail:

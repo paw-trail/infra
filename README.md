@@ -44,7 +44,7 @@
   │                  gateway-server       8080        모든 요청의 입구
   │
   ├── app            auth-service         8081        개발이 끝난 도메인 서비스
-  │                  user-service         8082        (app 에 들어갈 11개 중 10개)
+  │                  user-service         8082        (app 에 들어갈 11개 전부)
   │                  pet-service          8083
   │                  place-service        8084
   │                  policy-service       8085
@@ -53,6 +53,7 @@
   │                  weather-service      8090
   │                  report-service       8092
   │                  notification-service 8093
+  │                  review-service       8094
   │
   ├── pipeline       ingest-service       8088        수집 배치
   │                  extract-service      8089        조건 추출 배치
@@ -234,6 +235,7 @@ docker compose up -d           한 번에 띄움
 | | weather-service | 8090 | 512m | 그 서비스를 안 고칠 때 |
 | | report-service | 8092 | 640m | 그 서비스를 안 고칠 때 |
 | | notification-service | 8093 | 640m | 그 서비스를 안 고칠 때 |
+| | review-service | 8094 | 640m | 그 서비스를 안 고칠 때 |
 | `pipeline` | ingest-service | 8088 | 640m | ⛔수집을 부르거나 관리자 수집 카드 · 원문보기를 볼 때 |
 | | extract-service | 8089 | 512m | ⛔조건을 뽑을 때만 |
 | `tools` | kafka-ui | **9000** | 512m | 토픽을 볼 때 |
@@ -1465,7 +1467,6 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 
 ```
 edge       nginx
-app        review  (나머지 도메인 서비스 10개는 들어감)
 ```
 
 **해당 저장소가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가합니다.**
