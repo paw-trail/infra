@@ -53,6 +53,12 @@
 #
 # 주의: profiles 가 없는 서비스는 어떤 프로파일을 켜든 항상 뜸
 #      켜는 조합이 상황마다 갈리므로 모든 서비스에 라벨을 붙임
+#
+# 포트를 여는 주소
+#   ports 는 모두 앞에 ${PUBLISH_ADDR:-0.0.0.0} 을 달고, 게이트웨이만 ${GATEWAY_ADDR:-0.0.0.0} 을 닮
+#   로컬은 .env 에 두 값을 비워 두므로 지금처럼 모든 주소에 열림
+#   배포 서버는 PUBLISH_ADDR=127.0.0.1 (서버 안에서만) · GATEWAY_ADDR=10.8.0.2 (WireGuard 터널 주소)
+#   /internal 에 인증을 붙이지 않았으므로 배포 서버에서는 게이트웨이 말고는 바깥에 열지 않음
 # =============================================================================
 
 services:
@@ -91,7 +97,7 @@ services:
       - -c
       - max_connections=200
     ports:
-      - "5432:5432"
+      - "${PUBLISH_ADDR:-0.0.0.0}:5432:5432"
     volumes:
       # PostgreSQL 17 의 데이터 경로임
       # 18 부터 /var/lib/postgresql 로 바뀌었음
@@ -156,8 +162,8 @@ services:
 
       KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
     ports:
-      - "9092:9092"
-      - "29092:29092"
+      - "${PUBLISH_ADDR:-0.0.0.0}:9092:9092"
+      - "${PUBLISH_ADDR:-0.0.0.0}:29092:29092"
     volumes:
       # kafka/create-topics.sh 를 컨테이너 안에서 실행하기 위한 마운트임
       # 호스트 셸에 의존하지 않으므로 Windows PowerShell 과 macOS 에서 명령이 같음
@@ -186,7 +192,7 @@ services:
     environment:
       TZ: Asia/Seoul
     ports:
-      - "6379:6379"
+      - "${PUBLISH_ADDR:-0.0.0.0}:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -217,7 +223,7 @@ services:
       JAVA_OPTS: -XX:MaxRAMPercentage=70
     ports:
       # 컨테이너 내부는 8080 이고 우리 포트 배정은 9000 임
-      - "9000:8080"
+      - "${PUBLISH_ADDR:-0.0.0.0}:9000:8080"
     mem_limit: 512m
     networks: [pawtrail]
 
@@ -265,7 +271,7 @@ services:
       EUREKA_HOST: eureka-server
       LOKI_HOST: loki
     ports:
-      - "8888:8888"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8888:8888"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8888/actuator/health"]
       interval: 10s
@@ -291,7 +297,7 @@ services:
       # 저장소의 기본값은 localhost 인데 컨테이너 안에서 그것은 자기 자신임
       CONFIG_HOST: config-server
     ports:
-      - "8761:8761"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8761:8761"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8761/actuator/health"]
       interval: 10s
@@ -315,7 +321,7 @@ services:
       SPRING_PROFILES_ACTIVE: dev
       CONFIG_HOST: config-server
     ports:
-      - "8080:8080"
+      - "${GATEWAY_ADDR:-0.0.0.0}:8080:8080"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/actuator/health"]
       interval: 10s
@@ -362,7 +368,7 @@ services:
       # 8081 을 여는 이유
       #   게이트웨이를 거치지 않고 직접 확인할 때 씀
       #   구글 콘솔에 auth 직결 콜백 주소도 등록해 두었음
-      - "8081:8081"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8081:8081"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/actuator/health"]
       interval: 10s
@@ -420,7 +426,7 @@ services:
       #   게이트웨이를 거치지 않고 직접 확인할 때 씀
       #   X-User-Id 헤더만 손으로 넣으면 되어 쿠키와 토큰 만료가 변수에서 빠짐
       #   /internal 두 개는 게이트웨이가 라우팅하지 않아 이쪽으로만 부를 수 있음
-      - "8082:8082"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8082:8082"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/actuator/health"]
       interval: 10s
@@ -486,7 +492,7 @@ services:
       #   게이트웨이를 거치지 않고 직접 확인할 때 씀
       #   /internal 두 개는 게이트웨이가 라우팅하지 않아 이쪽으로만 부를 수 있음
       #   그때는 X-User-Id 헤더를 손으로 붙여야 소유권 검증을 지남
-      - "8083:8083"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8083:8083"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8083/actuator/health"]
       interval: 10s
@@ -545,7 +551,7 @@ services:
       #   게이트웨이를 거치지 않고 직접 확인할 때 씀
       #   /internal 다섯은 게이트웨이가 라우팅하지 않아 이쪽으로만 부를 수 있음
       #   수집 서비스가 부르는 적재도 그 경로임
-      - "8084:8084"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8084:8084"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8084/actuator/health"]
       interval: 10s
@@ -605,7 +611,7 @@ services:
       #   게이트웨이를 거치지 않고 직접 확인할 때 씀
       #   /internal 2개(bulk · batch)는 게이트웨이가 라우팅하지 않아 이쪽으로만 부를 수 있음
       #   * IntelliJ 로 policy 를 띄워 둔 채 이 컨테이너를 올리면 포트가 겹침
-      - "8085:8085"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8085:8085"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8085/actuator/health"]
       interval: 10s
@@ -649,7 +655,7 @@ services:
       #   게이트웨이를 거치지 않고 직접 확인할 때 씀
       #   목록 판정(/internal/verdicts/batch)은 게이트웨이가 라우팅하지 않아 이쪽으로만 부를 수 있음
       #   * IntelliJ 로 verdict 를 띄워 둔 채 이 컨테이너를 올리면 포트가 겹침
-      - "8086:8086"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8086:8086"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8086/actuator/health"]
       interval: 10s
@@ -704,7 +710,7 @@ services:
       # 8087 을 여는 이유
       #   게이트웨이를 거치지 않고 직접 확인할 때 씀
       #   * IntelliJ 로 search 를 띄워 둔 채 이 컨테이너를 올리면 포트가 겹침
-      - "8087:8087"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8087:8087"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8087/actuator/health"]
       interval: 10s
@@ -758,7 +764,7 @@ services:
       #   게이트웨이를 거치지 않고 직접 확인할 때 씀
       #   그때는 X-User-Id · X-User-Role 헤더를 손으로 붙여야 함
       #   * IntelliJ 로 report 를 띄워 둔 채 이 컨테이너를 올리면 포트가 겹침
-      - "8092:8092"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8092:8092"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8092/actuator/health"]
       interval: 10s
@@ -813,7 +819,7 @@ services:
       #   게이트웨이를 거치지 않고 직접 확인할 때 씀
       #   그때는 X-User-Id · X-User-Role 헤더를 손으로 붙여야 함
       #   * IntelliJ 로 notification 을 띄워 둔 채 이 컨테이너를 올리면 포트가 겹침
-      - "8093:8093"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8093:8093"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8093/actuator/health"]
       interval: 10s
@@ -864,7 +870,7 @@ services:
       # 8090 을 여는 이유
       #   게이트웨이를 거치지 않고 health · 차단기 지표(/actuator/prometheus)를 볼 때 씀
       #   * IntelliJ 로 weather 를 띄워 둔 채 이 컨테이너를 올리면 포트가 겹침
-      - "8090:8090"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8090:8090"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8090/actuator/health"]
       interval: 10s
@@ -922,7 +928,7 @@ services:
       #   게이트웨이를 거치지 않고 직접 확인할 때 씀
       #   /internal 세 개는 게이트웨이가 라우팅하지 않아 이쪽으로만 부를 수 있음
       #   그때는 X-User-Id 헤더를 손으로 붙여야 계정 확인을 지남
-      - "8094:8094"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8094:8094"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8094/actuator/health"]
       interval: 10s
@@ -990,7 +996,7 @@ services:
       # 8088 을 여는 이유
       #   게이트웨이를 거치는 것은 관리자 수집 입구 둘뿐임
       #   전량 · 넘기기 · 바로 보내기와 전체 실행 이력은 /internal 이라 이쪽으로만 부름
-      - "8088:8088"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8088:8088"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8088/actuator/health"]
       interval: 10s
@@ -1030,7 +1036,7 @@ services:
       # 8089 를 여는 이유
       #   경로가 전부 /internal 이라 게이트웨이가 라우팅하지 않음
       #   조건 추출을 부르는 것도 이쪽으로만 됨
-      - "8089:8089"
+      - "${PUBLISH_ADDR:-0.0.0.0}:8089:8089"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8089/actuator/health"]
       interval: 10s
@@ -1064,7 +1070,7 @@ services:
       # 타깃을 추가할 때마다 컨테이너를 재시작하지 않아도 됨
       - --web.enable-lifecycle
     ports:
-      - "9090:9090"
+      - "${PUBLISH_ADDR:-0.0.0.0}:9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     mem_limit: 512m
@@ -1086,7 +1092,7 @@ services:
     environment:
       TZ: Asia/Seoul
     ports:
-      - "3100:3100"
+      - "${PUBLISH_ADDR:-0.0.0.0}:3100:3100"
     mem_limit: 512m
     networks: [pawtrail]
 
@@ -1121,7 +1127,7 @@ services:
       JAVA_OPTS: "-Xms512m -Xmx512m -XX:+ExitOnOutOfMemoryError"
       MEM_MAX_SPANS: "100000"
     ports:
-      - "9411:9411"
+      - "${PUBLISH_ADDR:-0.0.0.0}:9411:9411"
     mem_limit: 1g
     networks: [pawtrail]
 
@@ -1153,7 +1159,7 @@ services:
       GF_INSTALL_PLUGINS: ""
     ports:
       # 우리 포트 배정은 3000 이고 프론트를 5173 으로 뺀 이유가 이것임
-      - "3000:3000"
+      - "${PUBLISH_ADDR:-0.0.0.0}:3000:3000"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
     mem_limit: 512m
