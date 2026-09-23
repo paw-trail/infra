@@ -108,7 +108,10 @@ paw-trail/infra
 │
 ├── kafka/create-topics.sh          토픽 12개
 ├── prometheus/prometheus.yml       수집 대상
-└── grafana/provisioning/           데이터소스 자동 등록
+├── grafana/provisioning/           데이터소스 자동 등록
+│
+├── edge/nginx/                     서버 앞단 nginx (Lightsail) — 4-7
+└── ops/                            서버 운영 기록 보관 (미니 PC) — 4-6
 ```
 
 <br><br>
@@ -825,6 +828,130 @@ docker compose up -d
 
 ---
 
+### 4-6. 서버에서 기록을 지우는 주기
+
+**서버(paw-trail.click)에서는 개인정보가 섞일 수 있는 기록을 30일 안에 지웁니다.**
+프론트의 개인정보처리방침(`/privacy`) 3장에 적은 보관 기간이 아래 설정에 걸려 있으므로, 값을 바꾸면 방침도 함께 고칩니다.
+
+| 기록 | 자리 | 지우는 장치 | 기간 |
+|---|---|---|---|
+| 서비스 로그 | Loki | compose `loki` 의 `command` (compactor 보관) | 30일 |
+| 컨테이너 표준 출력 | 미니 PC journald | `ops/journald-pawtrail.conf` · docker 로그 드라이버 `journald` | 30일 |
+| 서비스 사이 처리 기록 | 서비스 DB 의 `outbox` | `ops/outbox-cleanup.sh` — 매일 04:30 systemd 타이머 | 발행 뒤 30일 |
+| 웹 서버 접속 기록 | Lightsail nginx | Ubuntu logrotate 기본값 (`daily` · `rotate 14`) | 14일 |
+| Kafka 메시지 | kafka | 브로커 기본값 | 7일 |
+
+---
+
+**`outbox` 를 따로 지우는 이유입니다.**
+
+```
+outbox — common 이 서비스 DB 마다 만드는 표
+        │
+        ├── 발행한 뒤에도 행을 지우는 코드가 없어 그대로 쌓임
+        └── 가입 이벤트에 이메일 · 닉네임이 실림
+              │
+              └── 탈퇴해도 사본이 남음 → 발행 뒤 30일이 지나면 지움
+                    * 아직 발행하지 못한 행은 관리자 재발행 화면이 쓰므로 남김
+```
+
+**docker 로그를 journald 로 옮기는 이유입니다.** docker 기본 로그(`json-file`)는 크기로만 자를 수 있어, 조용한 서비스는 몇 달치가 남습니다. journald 는 날짜로 지울 수 있고 `docker logs` 도 그대로 씁니다.
+
+---
+
+**서버에 처음 놓을 때입니다.** 미니 PC 에서 합니다. Loki 보관 기간은 compose 에 있어 로컬에도 적용되지만, 나머지는 서버에만 놓습니다.
+
+```bash
+cd ~/pawtrail/infra && git pull
+sudo bash ops/install.sh
+sudo systemctl restart docker
+sudo docker compose up -d --force-recreate
+```
+
+> ⚠ **docker 를 다시 시작하면 모든 컨테이너가 멈춥니다.**
+> 로그 드라이버는 컨테이너를 새로 만들 때 바뀌므로 `--force-recreate` 까지 해야 합니다.
+> 같은 미니 PC 에서 도는 다른 컨테이너도 멈추므로, 재시작 정책이 없는 것은 따로 다시 띄웁니다.
+
+**확인입니다.**
+
+```bash
+systemctl list-timers pawtrail-outbox-cleanup.timer
+sudo bash ops/outbox-cleanup.sh --dry-run
+sudo docker inspect -f '{{.HostConfig.LogConfig.Type}}' pawtrail-auth-service
+journalctl -u pawtrail-outbox-cleanup --since today
+```
+
+타이머의 다음 실행 시각, DB 마다 지울 행 수, `journald` 가 나오면 됩니다.
+
+<br><br>
+
+---
+
+### 4-7. 앞단 nginx (Lightsail)
+
+**nginx 는 compose 가 아니라 Lightsail 서버에 `apt` 로 깝니다.** 인터넷에 바로 닿는 자리라 Ubuntu 자동 보안 업데이트를 받게 하기 위함입니다.
+
+```
+브라우저 ──▶ Cloudflare ──▶ nginx (Lightsail) ──┬── /api/ ──▶ WireGuard 터널 ──▶ 게이트웨이 10.8.0.2:8080 (미니 PC)
+                                                └── 그 밖  ──▶ /var/www/paw-trail (프론트 빌드 결과)
+```
+
+| 파일 | 서버에 놓이는 자리 | 하는 일 |
+|---|---|---|
+| `edge/nginx/paw-trail.conf` | `/etc/nginx/sites-available/paw-trail.conf` | 호출 제한 · Cloudflare 를 거친 요청만 받기 · `/api/` 넘기기 · 점검 · 캐시 |
+| `edge/nginx/cloudflare-realip.sh` | `/usr/local/sbin/pawtrail-cloudflare-realip` | Cloudflare 주소 대역을 받아 진짜 사용자 IP 를 푸는 파일 둘을 만듦 |
+| `edge/nginx/maintenance.html` | `/var/www/paw-trail-maint/maintenance.html` | 점검 페이지 |
+| `edge/nginx/install.sh` | 그 자리에서 실행 | 위 셋을 놓고 `nginx -t` 를 통과하면 다시 읽힘 |
+
+**인증서는 저장소에 넣지 않습니다.** Cloudflare Origin 인증서(`/etc/ssl/paw-trail/origin.pem` · `origin.key`)는 서버에만 있습니다.
+
+---
+
+**설치 · 갱신입니다.** 폴더째 올리고 Lightsail 에서 돌립니다. 여러 번 돌려도 결과가 같습니다.
+
+Windows (PowerShell)
+
+```powershell
+scp -i "$HOME\.ssh\LightsailDefaultKey-ap-northeast-2.pem" -r .\edge\nginx ubuntu@3.35.245.236:/home/ubuntu/edge-nginx
+```
+
+macOS
+
+```bash
+scp -i ~/.ssh/LightsailDefaultKey-ap-northeast-2.pem -r ./edge/nginx ubuntu@3.35.245.236:/home/ubuntu/edge-nginx
+```
+
+Lightsail
+
+```bash
+sudo bash ~/edge-nginx/install.sh
+```
+
+---
+
+**호출 제한입니다.** 키는 Cloudflare 가 알려 준 진짜 사용자 IP 입니다.
+
+| 구역 | 대상 | 평소 | 순간 허용 |
+|---|---|---|---|
+| auth | POST 로그인 · 가입 · 비밀번호 재설정 · 이메일 인증 | 분당 10 | 10 |
+| api | 그 밖의 `/api/` | 초당 10 | 40 |
+| static | 프론트 파일 | 초당 20 | 100 |
+
+넘치면 429 이며, API 는 우리 응답 모양의 JSON(`TOO_MANY_REQUESTS`)으로 답합니다.
+
+**자주 쓰는 명령입니다.**
+
+| 할 일 | 명령 |
+|---|---|
+| 점검 켜기 | `sudo touch /etc/nginx/maintenance.on` |
+| 점검 끄기 | `sudo rm /etc/nginx/maintenance.on` |
+| Cloudflare 대역 갱신 | `sudo pawtrail-cloudflare-realip` |
+| 프론트 올리기 (예: v0.1.1) | `sudo rsync -a --delete --chown=root:root ~/frontend-dist-v0.1.1/ /var/www/paw-trail/` |
+
+<br><br>
+
+---
+
 ## 5. 자주 쓰는 명령
 
 ```bash
@@ -1492,17 +1619,11 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 | **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth · user · pet · place · policy · verdict · search · weather · report · notification) |
 | **EC2 PostgreSQL** | 수집 데이터를 공유해야 할 때. ⛔아직 각자 로컬 |
 | **지금 만들 수 있음** | `scripts/seed.sh` · `seed.ps1` — 테스트 데이터 시드. `pet` 까지 나와 계정 · 프로필 · 반려동물을 한 번에 채울 수 있음 |
-| **nginx 를 붙일 때** | `edge` 프로파일 · `nginx.conf` |
+| **서버 재부팅** | compose 에 재시작 정책이 없어 미니 PC 가 재부팅되면 컨테이너가 안 뜸 · 서비스가 설정 서버를 `optional:` 로 읽어 순서 없이 뜨면 기본값으로 뜰 수 있으므로 순서를 지켜 띄우는 방법을 정해야 함 |
 
 ---
 
-**아직 compose 에 없는 것입니다.**
-
-```
-edge       nginx
-```
-
-**해당 저장소가 완성되고 ghcr 에 이미지가 올라간 뒤에 추가합니다.**
+**nginx 는 compose 에 넣지 않았습니다.** Lightsail 서버에 `apt` 로 깔고 설정은 `edge/nginx/` 에 둡니다 — [4-7](#4-7-앞단-nginx-lightsail).
 
 <br><br>
 
