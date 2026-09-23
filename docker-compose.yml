@@ -59,6 +59,12 @@
 #   로컬은 .env 에 두 값을 비워 두므로 지금처럼 모든 주소에 열림
 #   배포 서버는 PUBLISH_ADDR=127.0.0.1 (서버 안에서만) · GATEWAY_ADDR=10.8.0.2 (WireGuard 터널 주소)
 #   /internal 에 인증을 붙이지 않았으므로 배포 서버에서는 게이트웨이 말고는 바깥에 열지 않음
+#
+# 스프링 프로필
+#   config-server 를 뺀 서비스는 SPRING_PROFILES_ACTIVE 를 ${SPRING_PROFILES_ACTIVE:-dev} 로 받음
+#   로컬은 .env 에 비워 두므로 지금처럼 dev 로 뜸
+#   배포 서버는 dev,prod — dev 의 컨테이너 주소 위에 prod 의 운영 값(https 쿠키 · 공개 주소 등)을 덮음
+#   config-server 는 자기 설정만 쓰므로 dev 로 고정함
 # =============================================================================
 
 services:
@@ -292,7 +298,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       # 설정 서버를 컨테이너 이름으로 찾음
       # 저장소의 기본값은 localhost 인데 컨테이너 안에서 그것은 자기 자신임
       CONFIG_HOST: config-server
@@ -318,7 +324,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       CONFIG_HOST: config-server
     ports:
       - "${GATEWAY_ADDR:-0.0.0.0}:8080:8080"
@@ -350,7 +356,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -408,7 +414,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -470,7 +476,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -535,7 +541,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -596,7 +602,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -645,7 +651,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -697,7 +703,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -750,7 +756,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -805,7 +811,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -858,7 +864,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -906,7 +912,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -974,7 +980,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음
@@ -1022,7 +1028,7 @@ services:
         condition: service_healthy
     environment:
       TZ: Asia/Seoul
-      SPRING_PROFILES_ACTIVE: dev
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
       # * 컨테이너 안에서 localhost 는 자기 자신이므로 컨테이너 이름으로 붙음
       #   IntelliJ 로 띄울 때는 각자 실행 구성에 localhost 를 넣음

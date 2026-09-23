@@ -615,6 +615,17 @@ After=wg-quick@wg0.service
 Wants=wg-quick@wg0.service
 ```
 
+---
+
+**배포 서버는 스프링 프로필을 `dev,prod` 로 겹쳐 켭니다.** config-server 를 뺀 서비스는 `SPRING_PROFILES_ACTIVE` 를 `.env` 에서 받고, 비워 두면 지금처럼 `dev` 로 뜹니다. 배포 서버는 `dev,prod` 를 넣어 dev 의 컨테이너 주소 위에 prod 의 운영 값을 덮습니다. 뒤에 적은 프로필이 앞의 같은 키를 덮으므로 순서를 바꾸지 않습니다.
+
+| 프로필 | 주는 값 | 자리 |
+|---|---|---|
+| `dev` | 컨테이너끼리 찾는 주소 (kafka · redis · eureka · zipkin · loki · DB) | config 저장소 `application-dev.yml` |
+| `prod` | https 쿠키 · 브라우저가 찾아가는 공개 주소 · API 문서 끄기 · 로그 수준 · 운영용 서명 공개키 | config 저장소 `application-prod.yml` · `gateway-server-prod.yml` |
+
+`prod` 만 따로 켜면 컨테이너 주소가 없어 local 주소로 붙으려 하므로 쓰지 않습니다. config-server 는 자기 설정만 쓰므로 `dev` 로 고정되어 있습니다.
+
 <br><br>
 
 ---
