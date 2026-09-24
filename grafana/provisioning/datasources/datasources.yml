@@ -10,6 +10,18 @@
 
 apiVersion: 1
 
+# 이미 등록된 두 데이터 소스를 지우고 아래에서 새로 만듦
+#   uid 를 정하기 전에는 Grafana 가 무작위 uid 로 등록해 두었음
+#   그 상태에서 uid 를 새로 적으면 Grafana 13 은 이름으로 찾은 뒤 새 uid 로 고치려다
+#   「Datasource provisioning error: data source not found」 로 멈추고 아예 뜨지 않음
+#   지우고 새로 만들면 처음부터 정한 uid 로 들어감
+# 뜰 때마다 지우고 새로 만들어도 설정이 전부 이 파일에 있어 잃는 것이 없음
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+  - name: Loki
+    orgId: 1
+
 datasources:
 
   # uid 를 정해 두는 것은 대시보드 JSON 이 이 이름으로 데이터 소스를 가리키기 때문임
