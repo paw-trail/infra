@@ -111,7 +111,7 @@ paw-trail/infra
 ├── grafana/provisioning/           데이터소스 자동 등록
 │
 ├── edge/nginx/                     서버 앞단 nginx (Lightsail) — 4-7
-└── ops/                            서버 운영 기록 보관 (미니 PC) — 4-6
+└── ops/                            서버 운영 설정 (미니 PC) — 4-6 · 4-8
 ```
 
 <br><br>
@@ -952,6 +952,37 @@ sudo bash ~/edge-nginx/install.sh
 
 ---
 
+### 4-8. 서버가 재부팅될 때
+
+**미니 PC 가 재부팅되면 systemd 유닛 `pawtrail-stack.service` 가 compose 스택을 순서대로 켭니다.** `ops/install.sh` 가 등록합니다.
+
+```
+부팅 ──▶ docker ──▶ pawtrail-stack.service ──▶ docker compose up -d --no-recreate ──▶ create-topics.sh
+```
+
+| 정한 것 | 까닭 |
+|---|---|
+| 재시작 정책 대신 유닛 | docker 는 재시작 정책으로 컨테이너를 켤 때 `depends_on` 순서를 지키지 않습니다. 서비스는 설정 서버를 `optional:` 로 읽으므로, 설정 서버보다 먼저 뜬 서비스가 오류 없이 기본값으로 뜰 수 있습니다 |
+| `--no-recreate` | 멈춘 컨테이너를 켜기만 합니다. 다시 만들지 않으므로 볼륨이 없는 Kafka 의 토픽이 그대로 남습니다 |
+| `create-topics.sh` 를 한 번 더 | 그래도 kafka 컨테이너가 새로 만들어진 경우를 대비합니다. 여러 번 돌려도 안전합니다 |
+| `docker.service` 에 딸림 | 부팅뿐 아니라 docker 를 다시 시작했을 때도 스택을 다시 켭니다 |
+
+> ⚠ **돌다가 한 컨테이너가 죽는 경우(메모리 부족 등)는 저절로 살아나지 않습니다.** 재시작 정책을 넣으려면 서비스가 설정 서버를 필수로 읽도록 함께 바꿔야 합니다 — [10장](#10-아직-안-한-것).
+
+**확인입니다.**
+
+```bash
+systemctl is-enabled pawtrail-stack.service
+systemctl status pawtrail-stack.service --no-pager
+journalctl -u pawtrail-stack -b --no-pager | tail -20
+```
+
+`enabled` 가 나오고, 재부팅 뒤 상태가 `active (exited)` 이면 됩니다.
+
+<br><br>
+
+---
+
 ## 5. 자주 쓰는 명령
 
 ```bash
@@ -1619,7 +1650,7 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 | **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth · user · pet · place · policy · verdict · search · weather · report · notification) |
 | **EC2 PostgreSQL** | 수집 데이터를 공유해야 할 때. ⛔아직 각자 로컬 |
 | **지금 만들 수 있음** | `scripts/seed.sh` · `seed.ps1` — 테스트 데이터 시드. `pet` 까지 나와 계정 · 프로필 · 반려동물을 한 번에 채울 수 있음 |
-| **서버 재부팅** | compose 에 재시작 정책이 없어 미니 PC 가 재부팅되면 컨테이너가 안 뜸 · 서비스가 설정 서버를 `optional:` 로 읽어 순서 없이 뜨면 기본값으로 뜰 수 있으므로 순서를 지켜 띄우는 방법을 정해야 함 |
+| **돌다가 죽은 컨테이너** | 재부팅은 `pawtrail-stack.service` 가 켜지만([4-8](#4-8-서버가-재부팅될-때)) 돌다가 죽은 컨테이너는 저절로 안 살아남 · 재시작 정책을 넣으려면 서비스가 설정 서버를 필수로 읽게 함께 바꿔야 함 |
 
 ---
 
