@@ -6,6 +6,7 @@
 #   2  docker 로그 → journald   /etc/docker/daemon.json 의 log-driver (다른 설정은 그대로 둠)
 #   3  outbox 정리 매일 04:30   pawtrail-outbox-cleanup.service · .timer
 #   4  부팅 때 스택 켜기        pawtrail-stack.service (docker 가 뜰 때마다 compose 를 순서대로 켬)
+#   5  Jenkins 배포 받기        사용자 pawtrail-deploy · 스크립트 둘 · sudo 한 줄 · 배포 키 하나
 #
 # docker 를 다시 시작하는 일은 하지 않음 — 컨테이너가 모두 멈추므로 따로 함
 #   sudo systemctl restart docker
@@ -106,3 +107,32 @@ UNIT
 systemctl daemon-reload
 systemctl enable pawtrail-stack.service >/dev/null
 echo "4 부팅 때 스택 켜기 — pawtrail-stack.service · ${R} 에서 docker compose up -d --no-recreate"
+
+# 5 Jenkins 배포 받기
+#   pawtrail-deploy 사용자는 비밀번호가 없고, ops/deploy_key.pub 의 키 하나로만 들어옴
+#   그 키는 10.8.0.1(Lightsail 의 Jenkins)에서만 · pawtrail-deploy-ssh 하나만 돌게 묶음
+#   restrict 가 포워딩 · 터미널을 모두 막고, sudo 로 부를 수 있는 것은 root 배포 스크립트 하나뿐
+id pawtrail-deploy >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/pawtrail-deploy --shell /bin/sh pawtrail-deploy
+# '!' 로 잠긴 계정은 설정에 따라 키 로그인도 막히므로 '*'(비밀번호 없음 · 잠금 아님)로 둠
+usermod -p '*' pawtrail-deploy
+install -m 755 "$D/deploy.sh" /usr/local/sbin/pawtrail-deploy
+install -m 755 "$D/deploy-ssh.sh" /usr/local/sbin/pawtrail-deploy-ssh
+printf 'INFRA_DIR=%s\n' "$R" > /etc/pawtrail-deploy.conf
+chmod 644 /etc/pawtrail-deploy.conf
+
+SUDOERS=$(mktemp)
+echo 'pawtrail-deploy ALL=(root) NOPASSWD: /usr/local/sbin/pawtrail-deploy' > "$SUDOERS"
+visudo -cf "$SUDOERS" >/dev/null
+install -m 440 "$SUDOERS" /etc/sudoers.d/pawtrail-deploy
+rm -f "$SUDOERS"
+
+install -d -m 700 -o pawtrail-deploy -g pawtrail-deploy /var/lib/pawtrail-deploy/.ssh
+printf 'restrict,from="10.8.0.1",command="/usr/local/sbin/pawtrail-deploy-ssh" %s\n' "$(cat "$D/deploy_key.pub")" \
+  > /var/lib/pawtrail-deploy/.ssh/authorized_keys
+chown pawtrail-deploy:pawtrail-deploy /var/lib/pawtrail-deploy/.ssh/authorized_keys
+chmod 600 /var/lib/pawtrail-deploy/.ssh/authorized_keys
+
+if grep -qiE '^[[:space:]]*AllowUsers' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null; then
+  echo "5 주의 — sshd 설정에 AllowUsers 가 있음 · pawtrail-deploy 를 더해야 로그인됨"
+fi
+echo "5 Jenkins 배포 받기 — pawtrail-deploy · 10.8.0.1 에서 · pawtrail-deploy-ssh 만 · sudo 는 /usr/local/sbin/pawtrail-deploy 하나"

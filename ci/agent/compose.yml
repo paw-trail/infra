@@ -1,0 +1,38 @@
+# =============================================================================
+# 함께하개 Jenkins agent — 데스크톱에서 띄움
+# =============================================================================
+# 쓰는 법   cd C:\Tour_Prj\infra\ci\agent
+#          (처음 한 번) .env.example 을 .env 로 복사하고 JENKINS_SECRET 을 채움
+#          docker compose up -d --build
+#
+# 비밀값    JENKINS_SECRET 은 본체의 노드 화면(desktop)에 나오는 값 · .env 에만 두고 레포에 올리지 않음
+# 재시작    restart: unless-stopped — Docker Desktop 이 켜지면 저절로 다시 붙음
+# =============================================================================
+name: pawtrail-ci
+
+services:
+  agent:
+    build: .
+    image: pawtrail-jenkins-agent:local
+    container_name: pawtrail-jenkins-agent
+    restart: unless-stopped
+    environment:
+      JENKINS_URL: http://10.8.0.1:8080/
+      JENKINS_AGENT_NAME: desktop
+      JENKINS_SECRET: ${JENKINS_SECRET:?JENKINS_SECRET 을 .env 에 넣을 것}
+      JENKINS_WEB_SOCKET: "true"
+      JENKINS_AGENT_WORKDIR: /home/jenkins/agent
+      # Testcontainers 가 띄운 옆 컨테이너(PostgreSQL)에 붙을 주소 — 이 컨테이너 안의 localhost 가 아님
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
+      TZ: Asia/Seoul
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent-work:/home/jenkins/agent
+      # 의존성 캐시 — 빌드마다 새로 받지 않게 남겨 둠
+      - gradle-cache:/root/.gradle
+      - npm-cache:/root/.npm
+
+volumes:
+  agent-work:
+  gradle-cache:
+  npm-cache:
