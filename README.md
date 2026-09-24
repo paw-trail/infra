@@ -85,9 +85,9 @@
 
 | | 값 | 어디에 |
 |---|---|---|
-| 컨테이너 | **13개** | [1-1](#1-1-무엇이-들어-있나) |
+| 컨테이너 | **24개** | [1-1](#1-1-무엇이-들어-있나) |
 | 프로파일 | 7개 | [3장](#3-프로파일--무엇을-띄울지-고르기) |
-| DB | 10개 | [4-2](#4-2-데이터베이스-10개) |
+| DB | 11개 | [4-2](#4-2-데이터베이스-11개) |
 | Kafka 토픽 | 12개 | [4-3](#4-3-kafka-토픽-12개) |
 | 코드 | **없음** | compose · 셸 스크립트 · 설정 파일만 |
 
@@ -98,7 +98,7 @@
 ```
 paw-trail/infra
 │
-├── docker-compose.yml              컨테이너 13개
+├── docker-compose.yml              컨테이너 24개
 ├── .env                            ⛔커밋 안 됨. 각자 만듦
 ├── .env.example                    그 목록과 설명
 │
@@ -110,8 +110,9 @@ paw-trail/infra
 ├── prometheus/prometheus.yml       수집 대상
 ├── grafana/provisioning/           데이터소스 자동 등록
 │
-├── edge/nginx/                     서버 앞단 nginx (Lightsail) — 4-7
-└── ops/                            서버 운영 설정 (미니 PC) — 4-6 · 4-8
+├── ci/agent/                       Jenkins 빌드 agent (데스크톱) — 4-11
+├── edge/nginx/                     서버 앞단 nginx · 프론트 교체 (Lightsail) — 4-7
+└── ops/                            서버 운영 설정 · 배포 받기 (미니 PC) — 4-6 · 4-8 · 4-12
 ```
 
 <br><br>
@@ -150,7 +151,7 @@ docker run kafka ...
 docker run redis ...
         │
         ▼
-docker-compose.yml             13개를 파일 하나에 적어 두고
+docker-compose.yml             24개를 파일 하나에 적어 두고
 docker compose up -d           한 번에 띄움
                   ▲
                   └── -d : 백그라운드로. 안 붙이면 터미널이 로그에 묶임
@@ -207,6 +208,7 @@ docker compose up -d           한 번에 띄움
 | 포트·DB·토픽이 뭐가 있는지 | [4장](#4-구성-요소) |
 | 자주 쓰는 명령 | [5장](#5-자주-쓰는-명령) |
 | IntelliJ 로 서비스를 띄우려 한다 | [6장](#6-서비스를-붙일-때) |
+| 태그를 달아 서비스 · 프론트를 배포한다 | [4-9](#4-9-jenkins-로-자동-배포) |
 | 플랫폼 이미지를 다시 굽는다 | [7장](#7-이미지-만들어-올리기) |
 | 뭔가 안 된다 | [8장](#8-막히기-쉬운-자리) |
 | Windows · macOS 차이 | [9장](#9-환경별-주의사항) |
@@ -901,30 +903,34 @@ journalctl -u pawtrail-outbox-cleanup --since today
 | `edge/nginx/paw-trail.conf` | `/etc/nginx/sites-available/paw-trail.conf` | 호출 제한 · Cloudflare 를 거친 요청만 받기 · `/api/` 넘기기 · 점검 · 캐시 |
 | `edge/nginx/cloudflare-realip.sh` | `/usr/local/sbin/pawtrail-cloudflare-realip` | Cloudflare 주소 대역을 받아 진짜 사용자 IP 를 푸는 파일 둘을 만듦 |
 | `edge/nginx/maintenance.html` | `/var/www/paw-trail-maint/maintenance.html` | 점검 페이지 |
-| `edge/nginx/install.sh` | 그 자리에서 실행 | 위 셋을 놓고 `nginx -t` 를 통과하면 다시 읽힘 |
+| `edge/nginx/frontend-deploy.sh` | `/usr/local/sbin/pawtrail-frontend-deploy` | 프론트 빌드를 사이트에 올림 — 보관 · 새 파일 먼저 · `index.html` 마지막 · 확인 · 되돌리기 |
+| `edge/nginx/install.sh` | 그 자리에서 실행 | 위 넷을 놓고 `nginx -t` 를 통과하면 다시 읽힘 · `jenkins` 계정에는 프론트 교체 스크립트 하나만 sudo 로 허락 |
 
 **인증서는 저장소에 넣지 않습니다.** Cloudflare Origin 인증서(`/etc/ssl/paw-trail/origin.pem` · `origin.key`)는 서버에만 있습니다.
 
 ---
 
-**설치 · 갱신입니다.** 폴더째 올리고 Lightsail 에서 돌립니다. 여러 번 돌려도 결과가 같습니다.
+**설치 · 갱신입니다.** Lightsail 에 이 저장소를 받아 두고, 거기서 설치 스크립트를 돌립니다. 여러 번 돌려도 결과가 같습니다.
+
+먼저 Lightsail 에 접속합니다.
 
 Windows (PowerShell)
 
 ```powershell
-scp -i "$HOME\.ssh\LightsailDefaultKey-ap-northeast-2.pem" -r .\edge\nginx ubuntu@3.35.245.236:/home/ubuntu/edge-nginx
+ssh -i "$HOME\.ssh\LightsailDefaultKey-ap-northeast-2.pem" ubuntu@3.35.245.236
 ```
 
 macOS
 
 ```bash
-scp -i ~/.ssh/LightsailDefaultKey-ap-northeast-2.pem -r ./edge/nginx ubuntu@3.35.245.236:/home/ubuntu/edge-nginx
+ssh -i ~/.ssh/LightsailDefaultKey-ap-northeast-2.pem ubuntu@3.35.245.236
 ```
 
-Lightsail
+Lightsail — 처음이면 받고, 이미 있으면 새로 받은 뒤 설치합니다.
 
 ```bash
-sudo bash ~/edge-nginx/install.sh
+[ -d ~/infra ] && git -C ~/infra pull || git clone https://github.com/paw-trail/infra.git ~/infra
+sudo bash ~/infra/edge/nginx/install.sh
 ```
 
 ---
@@ -946,7 +952,9 @@ sudo bash ~/edge-nginx/install.sh
 | 점검 켜기 | `sudo touch /etc/nginx/maintenance.on` |
 | 점검 끄기 | `sudo rm /etc/nginx/maintenance.on` |
 | Cloudflare 대역 갱신 | `sudo pawtrail-cloudflare-realip` |
-| 프론트 올리기 (예: v0.1.1) | `sudo rsync -a --delete --chown=root:root ~/frontend-dist-v0.1.1/ /var/www/paw-trail/` |
+| 프론트 올리기 — Jenkins 를 쓸 수 없을 때 (예: v0.1.2) | `sudo pawtrail-frontend-deploy /home/ubuntu/frontend-dist-v0.1.2 v0.1.2` |
+
+**평소 프론트는 Jenkins 가 올립니다**([4-9](#4-9-jenkins-로-자동-배포)). 손으로 올릴 때도 같은 스크립트를 써야 교체 순서 · 확인 · 되돌리기가 똑같이 적용됩니다.
 
 <br><br>
 
@@ -978,6 +986,421 @@ journalctl -u pawtrail-stack -b --no-pager | tail -20
 ```
 
 `enabled` 가 나오고, 재부팅 뒤 상태가 `active (exited)` 이면 됩니다.
+
+<br><br>
+
+---
+
+### 4-9. Jenkins 로 자동 배포
+
+**릴리스 태그(`vX.Y.Z`)를 달면 Jenkins 가 서버까지 바꿉니다.** 도메인 서비스 13개와 프론트가 대상입니다.
+
+```
+서비스   태그 ──▶ Jenkins ──▶ [데스크톱] 빌드 · 테스트 · 멀티아치 이미지 push ──▶ [Jenkins 본체] SSH ──▶ 미니 PC 에서 교체
+프론트   태그 ──▶ Jenkins ──▶ [데스크톱] npm ci · npm run build               ──▶ [Jenkins 본체] 사이트 폴더에 올림
+```
+
+| 자리 | 무엇 | 자세히 |
+|---|---|---|
+| Lightsail | Jenkins 본체 — WireGuard 주소 `10.8.0.1:8080` 에서만 받고, 그중에서도 데스크톱(`10.8.0.3`)만 들어옴 | [4-10](#4-10-jenkins-본체-lightsail) |
+| 데스크톱 | 빌드 agent — Docker Desktop 에서 도는 컨테이너 (`ci/agent/`) | [4-11](#4-11-빌드-agent-데스크톱) |
+| 미니 PC | 배포 받기 — Jenkins 가 부를 수 있는 스크립트 하나 (`ops/deploy.sh`) | [4-12](#4-12-배포-받기-미니-pc) |
+| Lightsail | 프론트 교체 — `edge/nginx/frontend-deploy.sh` | [4-7](#4-7-앞단-nginx-lightsail) |
+| 파이프라인 코드 | `paw-trail/jenkins-library` — Jenkins 화면에서 할 설정도 그 README 에 있음 | — |
+
+---
+
+**지켜야 할 규칙입니다.**
+
+| 규칙 | 까닭 |
+|---|---|
+| 릴리스 태그는 main 에만 답니다 | 파이프라인은 태그 모양만 보고, 그 커밋이 main 에 있는지는 확인하지 않습니다. 기능 브랜치에 태그를 달면 머지되지 않은 코드가 운영에 올라갑니다 |
+| 태그는 GitHub Releases 에서 답니다 | 릴리스 제목 · 본문이 함께 남고, 대상 브랜치를 main 으로 고르는 칸이 있습니다 |
+
+---
+
+**Jenkins 가 태그를 알아채는 방법입니다.** Jenkins 가 2분마다 GitHub 에 새 태그가 있는지 묻습니다(폴링). GitHub 가 먼저 알려 주는 웹훅을 쓰지 않는 것은, 웹훅을 받으려면 Jenkins 를 인터넷에 열어야 하기 때문입니다.
+
+| 상황 | 어떻게 되나 |
+|---|---|
+| 태그를 달았을 때 | 2분 안에 빌드가 시작됩니다 |
+| 데스크톱이 꺼져 있을 때 | 빌드가 대기열에서 기다렸다가, 데스크톱이 켜지면 이어서 돕니다. 사이트는 영향이 없습니다 |
+| 레포에 처음 태그를 달 때 | 그 레포에는 아직 Jenkins 잡이 없어서 2분 확인이 돌지 않습니다. Jenkins 의 `paw-trail` 폴더에서 **Scan Organization Now** 를 한 번 누릅니다 |
+| 플랫폼 셋 (`config-server` · `eureka-server` · `gateway-server`) | 아직 릴리스 태그가 없습니다. 첫 태그를 달기 전에 main 이 지금 도는 이미지와 같은 코드인지 확인합니다 — 셋은 그동안 손으로 구웠습니다([7장](#7-이미지-만들어-올리기)) |
+
+---
+
+**Jenkins 화면을 보는 법입니다.**
+
+| 어디서 | 방법 |
+|---|---|
+| 데스크톱 | WireGuard 의 `pawtrail` 터널을 켜고 `http://10.8.0.1:8080` |
+| 다른 기기 | Lightsail 로 SSH 터널을 연 채로 `http://localhost:8080` — 아래 명령 |
+
+Windows (PowerShell)
+
+```powershell
+ssh -i "$HOME\.ssh\LightsailDefaultKey-ap-northeast-2.pem" -L 8080:10.8.0.1:8080 ubuntu@3.35.245.236
+```
+
+macOS
+
+```bash
+ssh -i ~/.ssh/LightsailDefaultKey-ap-northeast-2.pem -L 8080:10.8.0.1:8080 ubuntu@3.35.245.236
+```
+
+<br><br>
+
+---
+
+### 4-10. Jenkins 본체 (Lightsail)
+
+**Jenkins 본체는 compose 가 아니라 Lightsail 에 `apt` 로 깝니다.** nginx 와 같은 까닭입니다 — systemd 로 켜지고, 판 올리기를 `apt` 로 합니다.
+
+**인터넷에는 열지 않습니다.** WireGuard 주소(`10.8.0.1`)에서만 받고, 그중에서도 데스크톱만 들어옵니다.
+
+| 누가 | 어디로 | 결과 |
+|---|---|---|
+| 인터넷 | Lightsail 의 8080 | 막힘 — Lightsail 방화벽에 8080 이 없음 |
+| 데스크톱 (`10.8.0.3`) | WireGuard 로 `10.8.0.1:8080` | 들어옴 |
+| 미니 PC (`10.8.0.2`) | WireGuard 로 `10.8.0.1:8080` | 막힘 — iptables 규칙 (아래 ④) |
+| Lightsail 안 (SSH 터널 · nginx) | `10.8.0.1:8080` | 들어옴 — 터널을 거치지 않는 연결이라 ④ 의 규칙에 걸리지 않음 |
+
+**WireGuard 에 붙은 기기입니다.**
+
+| 주소 | 기기 | 하는 일 |
+|---|---|---|
+| `10.8.0.1` | Lightsail | 터널의 가운데 · Jenkins 본체 |
+| `10.8.0.2` | 미니 PC | 게이트웨이를 Lightsail 에 내줌 · Jenkins 의 배포를 받음 |
+| `10.8.0.3` | 데스크톱 | Jenkins 화면 · 빌드 agent |
+
+---
+
+**처음 한 번 세우는 순서입니다.** 모두 Lightsail 에서 합니다(②의 앞부분만 데스크톱).
+
+#### ① 스왑 2G
+
+Lightsail 은 메모리가 4GB 라, Java 로 도는 Jenkins 를 올리기 전에 스왑을 깝니다. 이미 있으면 건너뜁니다.
+
+```bash
+[ -f /swapfile ] || { sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile; }
+grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swappiness.conf && sudo sysctl -p /etc/sysctl.d/99-swappiness.conf
+```
+
+`swappiness=10` 은 메모리가 정말 모자랄 때만 스왑을 쓰게 하는 값입니다.
+
+#### ② 데스크톱을 WireGuard 에 붙이기
+
+데스크톱에 WireGuard 앱을 깔고 빈 터널을 만듭니다. Windows 는 `https://www.wireguard.com/install/`, macOS 는 App Store 의 WireGuard 입니다. 두 OS 모두 **빈 터널 추가**를 누르면 `PrivateKey` 줄이 채워진 편집 칸이 나오며, 그 줄 아래에 이것을 붙입니다.
+
+```
+Address = 10.8.0.3/32
+
+[Peer]
+PublicKey = /JbdnVgcFuSZQ1hLEUEXvHLdtNSxlRZXrjSzKH+FZGM=
+Endpoint = 3.35.245.236:51820
+AllowedIPs = 10.8.0.1/32
+PersistentKeepalive = 25
+```
+
+`AllowedIPs` 를 `10.8.0.1/32` 하나로 두는 것은, 이 터널로 가는 것이 Lightsail 주소뿐이기 때문입니다. 인터넷과 집 안 통신은 그대로 나갑니다.
+
+앱 맨 위의 **공개 키**를 Lightsail 에 피어로 등록합니다. 아래는 지금 등록된 데스크톱의 공개 키이며, 다른 기기를 붙일 때는 그 기기의 공개 키와 새 주소(`10.8.0.4` …)로 바꿉니다.
+
+```bash
+PEER=5UgRYF64GqbCPx8s4nKkxmp2RDm6LNvdsm5DcMimEXk=
+sudo grep -q "$PEER" /etc/wireguard/wg0.conf || printf '\n[Peer]\n# 데스크톱 — Jenkins agent · 화면\nPublicKey = %s\nAllowedIPs = 10.8.0.3/32\n' "$PEER" | sudo tee -a /etc/wireguard/wg0.conf > /dev/null
+sudo wg set wg0 peer "$PEER" allowed-ips 10.8.0.3/32
+sudo wg show wg0 allowed-ips
+```
+
+터널을 내렸다 올리지 않고 피어만 더하므로 미니 PC 터널은 끊기지 않습니다. 설정 파일에도 같은 내용을 덧붙여 재부팅 뒤에도 남습니다.
+
+#### ③ Jenkins 설치
+
+**설치 전에 systemd 덮어쓰기를 먼저 둡니다.** 그래야 첫 기동부터 WireGuard 주소에서만 받습니다.
+
+```bash
+sudo mkdir -p /etc/systemd/system/jenkins.service.d
+sudo tee /etc/systemd/system/jenkins.service.d/pawtrail.conf > /dev/null <<'CONF'
+[Unit]
+# WireGuard 주소에서만 받으므로 터널이 먼저 떠 있어야 함
+After=wg-quick@wg0.service
+Wants=wg-quick@wg0.service
+
+[Service]
+Environment="JENKINS_LISTEN_ADDRESS=10.8.0.1"
+Environment="JENKINS_PORT=8080"
+Environment="JAVA_OPTS=-Djava.awt.headless=true -Xmx1g"
+CONF
+sudo apt-get update && sudo apt-get install -y fontconfig openjdk-21-jre-headless
+curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
+echo "deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
+sudo apt-get update && sudo apt-get install -y jenkins
+sudo systemctl daemon-reload && sudo systemctl restart jenkins
+sudo ss -ltnp | grep ':8080'
+```
+
+마지막 줄이 `10.8.0.1:8080` 이면 됩니다. `0.0.0.0:8080` 이면 덮어쓰기가 먹지 않은 것입니다.
+
+> Jenkins 의 apt 저장소 서명 키는 2026년 1월 LTS(2.541.1)부터 `jenkins.io-2026.key` 입니다. 인터넷의 설치 글에 흔한 `jenkins.io-2023.key` 는 2026년 3월에 만료되어 그것으로는 설치가 막힙니다.
+
+#### ④ 8080 을 데스크톱만 받게
+
+터널 안에서도 8080 은 데스크톱(`10.8.0.3`)만 받게 합니다. 미니 PC 가 뚫리더라도 거기서 Jenkins 로 넘어오지 못하게 하기 위해서입니다.
+
+```bash
+sudo iptables -C INPUT -i wg0 -p tcp --dport 8080 ! -s 10.8.0.3 -j DROP 2>/dev/null || sudo iptables -I INPUT -i wg0 -p tcp --dport 8080 ! -s 10.8.0.3 -j DROP
+sudo grep -q 'dport 8080' /etc/wireguard/wg0.conf || { sudo sed -i '/^\[Interface\]/a PostDown = iptables -D INPUT -i wg0 -p tcp --dport 8080 ! -s 10.8.0.3 -j DROP' /etc/wireguard/wg0.conf; sudo sed -i '/^\[Interface\]/a PostUp = iptables -I INPUT -i wg0 -p tcp --dport 8080 ! -s 10.8.0.3 -j DROP' /etc/wireguard/wg0.conf; }
+sudo iptables -S INPUT | grep 8080
+```
+
+첫 줄은 지금 바로 규칙을 넣고, 둘째 줄은 터널이 올라올 때 넣고 내려갈 때 빼도록 `wg0.conf` 에 적어 재부팅 뒤에도 남깁니다. WireGuard 는 피어마다 쓸 수 있는 주소가 정해져 있어서, 미니 PC 가 `10.8.0.3` 을 사칭할 수도 없습니다.
+
+#### ⑤ 첫 화면 · 플러그인 · 관리자
+
+데스크톱 브라우저에서 `http://10.8.0.1:8080` 을 엽니다. 첫 비밀번호는 Lightsail 에서 봅니다.
+
+```bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+```
+
+| 화면 | 고를 것 |
+|---|---|
+| 플러그인 | **Install suggested plugins** — 몇 개가 실패하면 **Retry** (한 플러그인에 기대는 여럿이 함께 실패하곤 함) |
+| 첫 관리자 | `admin` 이 아닌 이름 · 긴 비밀번호 — **Skip and continue as admin** 은 누르지 않음 |
+| Jenkins URL | `http://10.8.0.1:8080/` |
+
+대시보드가 뜨면 **Jenkins 관리 → Plugins → Available plugins** 에서 둘을 더 깝니다.
+
+| 플러그인 | 쓰는 곳 |
+|---|---|
+| Basic Branch Build Strategies | 새 태그를 보면 저절로 빌드 — 기본값으로는 태그를 빌드하지 않음 |
+| SSH Agent | 파이프라인에서 SSH 를 쓸 때 (지금 파이프라인은 키 파일을 직접 씀) |
+
+**Jenkins 관리 → Security** 는 설치 마법사의 기본값 그대로 둡니다 — 로그인한 사용자만 · 익명 읽기 끔 · 가입 끔 · 인바운드 agent 용 TCP 포트 끔(agent 는 8080 위의 WebSocket 으로 붙음).
+
+#### ⑥ 나머지 설정
+
+자격 증명 · 라이브러리 등록 · 노드 · 조직 폴더는 Jenkins 화면에서 하며, `paw-trail/jenkins-library` README 의 「3. Jenkins 에 해 둔 설정」 에 있습니다.
+
+---
+
+**운영 할 일입니다.**
+
+| 할 일 | 주기 | 방법 |
+|---|---|---|
+| Jenkins 판 올리기 | 한 달에 한 번 | Lightsail 에서 `sudo apt-get update && sudo apt-get install --only-upgrade jenkins` |
+| 플러그인 판 올리기 | 한 달에 한 번 | Jenkins 관리 → Plugins → Updates |
+| GitHub 토큰 (`github-packages`) | 만료 전 | 새 토큰을 만들어 Jenkins 관리 → Credentials 에서 바꿈 — 만료되면 태그를 달아도 빌드가 조용히 멈춤 |
+
+<br><br>
+
+---
+
+### 4-11. 빌드 agent (데스크톱)
+
+**빌드는 데스크톱의 Docker Desktop 에서 도는 agent 컨테이너가 합니다.** Jenkins 본체는 일을 나눠 주고, 실제 빌드 · 테스트 · 이미지 굽기는 여기서 돕니다.
+
+| 파일 | 하는 일 |
+|---|---|
+| `ci/agent/Dockerfile` | Jenkins 공식 agent 이미지(JDK 21)에 docker CLI · buildx · Node 22 를 더함 |
+| `ci/agent/compose.yml` | 데스크톱에서 띄우는 설정 — 본체 주소 · 노드 이름 · 도커 소켓 · 캐시 |
+| `ci/agent/.env.example` | 비밀값 자리. 실제 `.env` 는 저장소에 올리지 않음 (루트 `.gitignore` 의 `.env`) |
+
+**컨테이너로 돌리는 까닭입니다.**
+
+| 까닭 | 설명 |
+|---|---|
+| 명령이 한 벌 | 서버와 같은 리눅스 명령(`sh`)으로 파이프라인을 씁니다. Windows 명령을 따로 쓰지 않습니다 |
+| 도구 판이 고정 | JDK · Node · buildx 판이 Dockerfile 에 적혀 남습니다 |
+| 개발 폴더와 따로 | 빌드가 컨테이너 안의 작업 폴더에서 돌아서, 개발 서버가 파일을 쥐고 있어도 `npm ci` 가 막히지 않습니다 |
+| 저절로 다시 붙음 | `restart: unless-stopped` 라 Docker Desktop 이 켜지면 agent 도 켜져 본체에 붙습니다 |
+
+---
+
+**도커는 데스크톱의 것을 빌려 씁니다.** 컨테이너에 도커 소켓(`/var/run/docker.sock`)을 넘겨주므로, 안에서 부르는 `docker` 명령은 데스크톱의 Docker Desktop 에 닿습니다.
+
+| 쓰는 곳 | 설명 |
+|---|---|
+| 이미지 굽기 | `docker buildx build --platform linux/amd64,linux/arm64 … --push` — Docker Desktop 의 containerd 이미지 저장소가 켜져 있어 기본 빌더로 두 아키텍처가 구워집니다 |
+| 테스트 | Testcontainers 가 PostgreSQL 컨테이너를 옆에 띄웁니다. 그 컨테이너는 agent 안이 아니라 Docker Desktop 위에 뜨므로, 붙을 주소를 `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal` 로 알려 줍니다 |
+
+컨테이너는 root 로 돕니다. 넘겨받은 소켓이 root 전용이기 때문이며, 소켓을 쓸 수 있으면 어차피 데스크톱의 도커 전체를 다룰 수 있어 사용자를 나눠도 막아 주는 것이 없습니다.
+
+---
+
+**처음 한 번 띄우는 순서입니다.** WireGuard 터널(4-10 의 ②)이 켜져 있어야 합니다.
+
+#### ① Jenkins 에 노드 만들기
+
+**Jenkins 관리 → Nodes → New Node**
+
+| 칸 | 값 |
+|---|---|
+| Node name | `desktop` · **Permanent Agent** |
+| Number of executors | `2` |
+| Remote root directory | `/home/jenkins/agent` |
+| Labels | `desktop docker` |
+| Usage | **Only build jobs with label expressions matching this node** |
+| Launch method | **Launch agent by connecting it to the controller** |
+
+연결 방식(WebSocket)은 agent 쪽 설정(`JENKINS_WEB_SOCKET=true`)이 정하므로 화면에서 따로 고르지 않습니다.
+
+#### ② 비밀값을 `.env` 에
+
+저장한 뒤 **Nodes** 에서 `desktop` 을 누르면 실행 명령 안의 `-secret` 뒤에 64글자 비밀값이 있습니다. `.env.example` 을 `.env` 로 복사하고 `JENKINS_SECRET=` 뒤에 붙입니다.
+
+Windows (PowerShell)
+
+```powershell
+cd C:\Tour_Prj\infra\ci\agent
+Copy-Item .env.example .env
+notepad .env
+(Get-Content .env | Select-String '^JENKINS_SECRET=[0-9a-f]{64}$').Count
+```
+
+macOS
+
+```bash
+cd ~/infra/ci/agent
+cp .env.example .env
+open -e .env
+grep -Ec '^JENKINS_SECRET=[0-9a-f]{64}$' .env
+```
+
+마지막 줄이 `1` 이면 됩니다. 비밀값은 채팅이나 이슈에 붙이지 않습니다.
+
+#### ③ 띄우기 · 확인
+
+두 OS 가 같습니다. 처음에는 이미지를 굽느라 몇 분 걸립니다.
+
+```bash
+docker compose up -d --build
+docker logs --tail 8 pawtrail-jenkins-agent
+docker exec pawtrail-jenkins-agent sh -c 'java -version 2>&1 | head -1; node -v; docker version --format "{{.Server.Version}}"; docker buildx version'
+```
+
+| 줄 | 기대하는 값 |
+|---|---|
+| 로그 | 끝에 `WebSocket connection open` · `Connected` |
+| 도구 | `openjdk version "21…"` · `v22.22.2` · Docker Desktop 엔진 판 · `github.com/docker/buildx v…` |
+
+Jenkins 의 **Nodes** 에서 `desktop` 이 연결 상태로 바뀌면 끝입니다.
+
+---
+
+**비밀값을 새로 바꾸는 법입니다.** 비밀값이 새어 나갔을 때 씁니다. Lightsail 에서 agent 비밀값을 만드는 열쇠 파일을 지우고 Jenkins 를 다시 켜면, 모든 agent 의 비밀값이 새로 만들어집니다.
+
+```bash
+sudo rm -f /var/lib/jenkins/secrets/jenkins.slaves.JnlpSlaveAgentProtocol.secret
+sudo systemctl restart jenkins
+```
+
+그 뒤 ② 로 새 값을 넣고 `docker compose up -d --force-recreate` 로 다시 띄웁니다. `.env` 를 고친 것은 컨테이너를 다시 만들어야 반영됩니다.
+
+<br><br>
+
+---
+
+### 4-12. 배포 받기 (미니 PC)
+
+**Jenkins 는 미니 PC 에 SSH 로 들어와 스크립트 하나만 부릅니다.** 그 키로는 셸이 열리지 않습니다.
+
+```
+Jenkins 본체 (Lightsail) ──SSH · WireGuard──▶ pawtrail-deploy 계정 ──▶ pawtrail-deploy-ssh ──sudo──▶ pawtrail-deploy <서비스> <판>
+```
+
+| 파일 | 미니 PC 에 놓이는 자리 | 하는 일 |
+|---|---|---|
+| `ops/deploy.sh` | `/usr/local/sbin/pawtrail-deploy` | 서비스 하나를 새 판으로 바꿈 — 무중단 · 되돌리기 (root 로 돎) |
+| `ops/deploy-ssh.sh` | `/usr/local/sbin/pawtrail-deploy-ssh` | SSH 강제 명령 — 요청을 「서비스 판」 두 단어로만 받아 위 스크립트를 부름 |
+| `ops/deploy_key.pub` | `/var/lib/pawtrail-deploy/.ssh/authorized_keys` | Jenkins 배포 키의 공개 키 — 공개 키라 저장소에 둠 |
+| `ops/install.sh` 의 5단계 | 그 자리에서 실행 | 전용 계정 `pawtrail-deploy` · 스크립트 둘 · sudo 한 줄 · 키 등록 |
+
+**키 하나에 겹이 셋입니다.**
+
+| 겹 | 막는 것 |
+|---|---|
+| `from="10.8.0.1"` | Lightsail(Jenkins)에서 온 접속만 받음 — 키가 새도 다른 곳에서는 못 씀 |
+| `command=` · `restrict` | 무엇을 요청하든 강제 명령 하나만 돎 — 셸 · 포워딩 · 터미널이 모두 막힘 |
+| sudoers 한 줄 | `pawtrail-deploy` 계정이 root 로 부를 수 있는 것은 `/usr/local/sbin/pawtrail-deploy` 하나 — 그 스크립트도 인자를 다시 검사하고, compose 에 `ghcr.io/paw-trail/<서비스>:latest` 로 떠 있는 서비스인지 대조함 |
+
+---
+
+**바꾸는 순서입니다.** 판은 `ghcr.io/paw-trail/<서비스>:<판>` 이 이미 올라가 있어야 합니다(Jenkins 가 먼저 올림). compose 는 `:latest` 를 가리키므로, 받은 판에 이 서버에서만 `latest` 이름을 붙여 바꿉니다.
+
+| 서비스 | 순서 | 끊김 |
+|---|---|---|
+| 도메인 서비스 | 지금 이미지를 `:previous` 로 표시 → 새 판을 받아 `:latest` → 임시 인스턴스(`-next`)를 새 판으로 띄움 → healthy · 유레카 UP → 본 인스턴스를 유레카에서 뺌(`OUT_OF_SERVICE`) → 90초 → 본 인스턴스를 새로 만듦 → healthy · 유레카 UP → 임시 인스턴스를 빼고 90초 → 내림 | 없음 · 3~5분 걸림 |
+| 설정 서버 · 유레카 · 게이트웨이 | `:previous` 표시 → 새 판 → 다시 만듦 → healthy (게이트웨이 · 설정 서버는 유레카 UP 까지) | 30~60초 |
+
+**90초를 기다리는 것은 게이트웨이가 옛 주소를 잊는 시간입니다.** 유레카 응답 캐시(30초) · 게이트웨이가 목록을 받아 오는 주기(30초) · 부하 분산 캐시(35초 안팎)를 더한 값입니다.
+
+| 그 밖의 규칙 | 뜻 |
+|---|---|
+| 확인이 실패하면 | `:previous` 로 되돌리고 실패로 끝남 → Jenkins 빌드도 실패로 표시됨 |
+| 한 번에 하나 | 두 배포가 겹치면 뒤의 것은 `다른 배포가 진행 중` 으로 멈춤 |
+| SSH 가 끊겨도 | 반쯤 바꾼 채로 멈추지 않고 끝까지 감 |
+| 예상 밖의 오류 | 스스로 고치려 들지 않고 `docker ps -a` · `docker images` 로 상태를 보라고 알림 |
+
+---
+
+**처음 한 번 세우는 순서입니다.**
+
+#### ① Lightsail — 배포 키
+
+키는 Jenkins 계정 폴더에만 두고, 파이프라인이 그 파일을 직접 씁니다. 비밀 키를 브라우저나 클립보드로 옮기지 않기 위해서입니다.
+
+```bash
+sudo -u jenkins mkdir -p /var/lib/jenkins/.ssh
+sudo -u jenkins chmod 700 /var/lib/jenkins/.ssh
+sudo -u jenkins test -f /var/lib/jenkins/.ssh/pawtrail_deploy || sudo -u jenkins ssh-keygen -t ed25519 -N '' -C 'jenkins@pawtrail-edge deploy' -f /var/lib/jenkins/.ssh/pawtrail_deploy
+sudo -u jenkins sh -c 'ssh-keyscan -t ed25519 10.8.0.2 >> /var/lib/jenkins/.ssh/known_hosts'
+sudo -u jenkins ssh-keygen -lf /var/lib/jenkins/.ssh/known_hosts
+sudo cat /var/lib/jenkins/.ssh/pawtrail_deploy.pub
+```
+
+넷째 줄이 받아 적은 호스트 키의 지문이 미니 PC 의 것과 같은지 대조합니다. 미니 PC 에서 이 명령의 `SHA256:…` 값이 같아야 합니다.
+
+```bash
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+마지막 줄의 공개 키 한 줄을 `ops/deploy_key.pub` 에 넣어 커밋합니다.
+
+#### ② 미니 PC — 설치
+
+```bash
+cd ~/pawtrail/infra && git pull
+sudo bash ops/install.sh
+sudo -l -U pawtrail-deploy | tail -1
+```
+
+마지막 줄이 `(root) NOPASSWD: /usr/local/sbin/pawtrail-deploy` 면 됩니다.
+
+#### ③ Lightsail — 시험
+
+셸 요청은 막혀야 하고, 서비스 배포는 끝까지 가야 합니다. 둘째 줄은 지금 도는 판을 그대로 다시 올리므로 기능은 바뀌지 않습니다.
+
+```bash
+sudo -u jenkins ssh -i /var/lib/jenkins/.ssh/pawtrail_deploy -o BatchMode=yes pawtrail-deploy@10.8.0.2 'id'
+sudo -u jenkins ssh -i /var/lib/jenkins/.ssh/pawtrail_deploy -o BatchMode=yes pawtrail-deploy@10.8.0.2 weather-service v0.1.0
+```
+
+| 줄 | 기대하는 값 |
+|---|---|
+| `'id'` | `쓰는 법: <서비스> <판>` — 셸이 열리지 않음 |
+| 배포 | 마지막 줄 `배포 끝 — weather-service v0.1.0 (끊김 없이)` |
+
+---
+
+**손으로 배포할 때는 미니 PC 에서 같은 스크립트를 부릅니다.** Jenkins 를 쓸 수 없을 때 씁니다.
+
+```bash
+sudo pawtrail-deploy weather-service v0.1.0
+```
 
 <br><br>
 
@@ -1153,7 +1576,9 @@ EC2 가 필요해지는 것은 수집 데이터를 함께 봐야 할 때
 
 ## 7. 이미지 만들어 올리기
 
-**플랫폼·도메인 서비스의 코드를 고쳤을 때만 합니다.**
+**도메인 서비스 · 프론트는 릴리스 태그를 달면 Jenkins 가 굽고 올립니다**([4-9](#4-9-jenkins-로-자동-배포)). 이 장은 손으로 굽는 방법이며, 아직 릴리스 태그가 없는 플랫폼 셋(`config-server` · `eureka-server` · `gateway-server`)을 고쳤을 때나 Jenkins 를 쓸 수 없을 때 씁니다.
+
+**손으로 구울 때도 릴리스 판이면 판 이름을 함께 붙여 올립니다.** `-t ghcr.io/paw-trail/<서비스>:<판> -t ghcr.io/paw-trail/<서비스>:latest` 처럼 두 이름을 주면 Jenkins 가 올리는 모양과 같아지고, 미니 PC 의 배포 스크립트가 그 판을 받을 수 있습니다([4-12](#4-12-배포-받기-미니-pc)).
 
 ```
 ① 서비스 저장소에서 빌드
@@ -1448,10 +1873,10 @@ docker compose logs postgres | grep "init-db"
 
 | 증상 | 원인 | 조치 |
 |---|---|---|
-| init 로그에 `bad interpreter: Permission denied` | ★**스크립트에 실행 권한이 없음** | 아래 별도 항목 |
+| init 로그에 `bad interpreter: Permission denied` | **스크립트에 실행 권한이 없음** | 아래 별도 항목 |
 | DB 가 안 만들어짐 | **볼륨이 이미 있음.** init 은 처음 한 번만 돎 | `down -v` 후 다시 |
 | `role does not exist` | 계정이 없음 — 위와 같음 | 같음 |
-| `password authentication failed` + **init 로그에 done 이 없음** | ★**계정이 아예 안 만들어짐.** 비밀번호 문제가 아님 | init 실패 원인을 먼저 해결한 뒤 `down -v` |
+| `password authentication failed` + **init 로그에 done 이 없음** | **계정이 아예 안 만들어짐.** 비밀번호 문제가 아님 | init 실패 원인을 먼저 해결한 뒤 `down -v` |
 | `password authentication failed` + **init 로그에 done 이 있음** | 계정은 있고 비밀번호만 다름 | `SERVICE_DB_PASSWORD` 확인 |
 | 비밀번호를 바꿨는데 안 먹음 | 계정은 **처음 만들 때의 값**을 유지함. `.env` 를 고쳐도 안 바뀜 | `down -v` 또는 `ALTER USER` |
 | Flyway `Detected applied migration not resolved locally` | **볼륨에 옛 이력이 남음** | `down -v` |
@@ -1587,6 +2012,27 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 
 ---
 
+### 8-6. Jenkins
+
+| 증상 | 까닭 · 할 일 |
+|---|---|
+| agent 로그에 `Did not receive X-Remoting-Capability header` · `Handshake error` 가 반복됨 | Jenkins 가 agent 를 거절한 것입니다. Lightsail 의 `sudo journalctl -u jenkins` 에 `incorrect secret for desktop` 이 있으면 비밀값이 다릅니다 → [4-11](#4-11-빌드-agent-데스크톱) ② 로 다시 넣고 `docker compose up -d --force-recreate` |
+| 빌드가 「대기 중」 에서 안 움직임 | 데스크톱 agent 가 꺼져 있습니다. Docker Desktop 과 WireGuard 의 `pawtrail` 터널이 켜져 있는지 봅니다 |
+| 태그를 달았는데 잡이 생기지 않음 | 그 레포의 첫 태그입니다. 잡이 없는 레포는 2분 확인이 돌지 않으므로 `paw-trail` 폴더에서 **Scan Organization Now** 를 누릅니다 |
+| 조직 폴더를 처음 만들자 빌드가 저절로 돎 | 「하루 안에 생긴 태그」 에 든 태그입니다. 지금 도는 판이면 해가 없습니다. 한 레포에 하루 안의 태그가 둘 이상이면 순서가 섞여 옛 판으로 끝날 수 있으니, 옛 태그의 빌드는 멈춥니다 |
+| 배포 단계에서 `다른 배포가 진행 중` | 미니 PC 에서 다른 배포가 돌고 있습니다. 끝난 뒤 그 빌드를 다시 돌립니다 |
+| 배포 단계가 `되돌림` 으로 실패 | 새 판이 healthy · 유레카 UP 을 통과하지 못했습니다. 서버는 옛 판으로 돌아가 있습니다. 새 판의 로그로 원인을 봅니다 |
+| 배포 단계에서 `Permission denied (publickey)` | 배포 키 · `authorized_keys` · `from=` 주소 중 하나가 어긋났습니다 → [4-12](#4-12-배포-받기-미니-pc) ① ② |
+| 배포 단계에서 `Host key verification failed` | Lightsail 의 `known_hosts` 에 미니 PC 호스트 키가 없습니다 → [4-12](#4-12-배포-받기-미니-pc) ① |
+| 프론트 배포 단계에서 `sudo: a password is required` | Lightsail 에 sudo 규칙이 없습니다. `edge/nginx/install.sh` 를 다시 돌립니다 → [4-7](#4-7-앞단-nginx-lightsail) |
+| 설치 때 플러그인 몇 개가 빨갛게 실패 | 한 플러그인에 기대는 여럿이 함께 실패하곤 합니다. **Retry** 를 누릅니다 |
+| `ss` 에 `0.0.0.0:8080` 이 보임 | systemd 덮어쓰기가 먹지 않았습니다 → [4-10](#4-10-jenkins-본체-lightsail) ③ |
+| 조직 탐색 로그에 `401` · `Bad credentials` | GitHub 토큰이 만료됐거나 지워졌습니다. 새 토큰으로 자격 증명 `github-packages` 를 바꿉니다 |
+
+<br><br>
+
+---
+
 ## 9. 환경별 주의사항
 
 <br><br>
@@ -1602,10 +2048,6 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 | 줄바꿈 | `.sh` 는 반드시 **LF**. CRLF 면 `\r: command not found` |
 | 예약 포트 | [8-1](#8-1-컨테이너가-안-뜰-때) |
 | WSL 메모리 | Docker Desktop 이 WSL2 위에서 돎 |
-
----
-
-<br><br>
 
 ---
 
@@ -1647,14 +2089,16 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 
 | 언제 | 무엇 |
 |---|---|
-| **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth · user · pet · place · policy · verdict · search · weather · report · notification) |
-| **EC2 PostgreSQL** | 수집 데이터를 공유해야 할 때. ⛔아직 각자 로컬 |
+| **도메인 서비스가 완성될 때마다** | compose `app` 프로파일에 추가 (지금 auth · user · pet · place · policy · verdict · search · weather · report · notification · review) |
+| **플랫폼 셋 첫 릴리스 태그** | `config-server` · `eureka-server` · `gateway-server` 는 태그가 없어 Jenkins 로 배포하지 못함 · 첫 태그 전에 main 이 지금 도는 이미지와 같은 코드인지 확인 ([4-9](#4-9-jenkins-로-자동-배포)) |
+| **Grafana 바깥 공개** | `grafana.paw-trail.click` 에서 Grafana 로그인으로 보게 할 예정 · 서버에서 익명 보기를 끄고 · 계정이 남도록 볼륨을 붙이고 · 관리자 이름을 바꾼 뒤에 엶 |
+| **관측 이미지 판 고정** | prometheus · loki · zipkin · grafana 가 `:latest` — 특정 판으로 고정 |
 | **지금 만들 수 있음** | `scripts/seed.sh` · `seed.ps1` — 테스트 데이터 시드. `pet` 까지 나와 계정 · 프로필 · 반려동물을 한 번에 채울 수 있음 |
 | **돌다가 죽은 컨테이너** | 재부팅은 `pawtrail-stack.service` 가 켜지만([4-8](#4-8-서버가-재부팅될-때)) 돌다가 죽은 컨테이너는 저절로 안 살아남 · 재시작 정책을 넣으려면 서비스가 설정 서버를 필수로 읽게 함께 바꿔야 함 |
 
 ---
 
-**nginx 는 compose 에 넣지 않았습니다.** Lightsail 서버에 `apt` 로 깔고 설정은 `edge/nginx/` 에 둡니다 — [4-7](#4-7-앞단-nginx-lightsail).
+**nginx 와 Jenkins 는 compose 에 넣지 않았습니다.** 둘 다 Lightsail 서버에 `apt` 로 깝니다 — nginx 는 [4-7](#4-7-앞단-nginx-lightsail), Jenkins 는 [4-10](#4-10-jenkins-본체-lightsail).
 
 <br><br>
 
@@ -1684,3 +2128,13 @@ docker exec -it pawtrail-redis redis-cli DEL "recent:places:{accountId}"
 | **매니페스트 목록** | 아키텍처별 이미지를 묶어 둔 것. 받는 쪽이 자기 아키텍처를 골라 감 |
 | **멀티아치 이미지** | 매니페스트 목록을 가진 이미지. `buildx build --platform linux/amd64,linux/arm64` 로 만듦 |
 | **레이어** | 이미지를 이루는 층. 같은 층은 다시 올리지 않음 |
+| **WireGuard** | 서버끼리 잇는 암호화 터널. 등록된 키를 가진 기기만 들어오며 `10.8.0.x` 주소를 씀 |
+| **Jenkins** | 태그를 보고 빌드 · 배포를 대신 돌리는 서버. Lightsail 에 있음 |
+| **agent** | Jenkins 본체 대신 실제로 빌드를 돌리는 쪽. 데스크톱의 컨테이너 |
+| **공유 라이브러리** | 여러 레포의 `Jenkinsfile` 이 함께 부르는 파이프라인 코드. `paw-trail/jenkins-library` (Jenkins 에서의 이름은 `pawtrail-pipeline`) |
+| **조직 폴더** | GitHub 조직을 훑어 `Jenkinsfile` 이 있는 레포마다 잡을 저절로 만드는 Jenkins 항목 |
+| **릴리스 태그** | main 에 다는 판 이름 `vX.Y.Z`. 달면 Jenkins 가 빌드 · 배포를 시작함 |
+| **폴링** | 새 것이 있는지 정해진 간격으로 먼저 묻는 것. Jenkins 가 2분마다 GitHub 에 태그를 물음 |
+| **강제 명령** | SSH 키에 묶어 둔 명령. 그 키로 들어오면 무엇을 요청하든 그 명령만 돎 (`authorized_keys` 의 `command=`) |
+| **무중단 교체** | 새 인스턴스를 먼저 띄워 확인한 뒤 옛 것을 내려, 바꾸는 동안에도 요청이 끊기지 않게 하는 방식 |
+| **스왑** | 메모리가 모자랄 때 디스크를 메모리처럼 빌려 쓰는 자리 |
