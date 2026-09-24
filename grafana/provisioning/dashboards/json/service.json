@@ -1,7 +1,7 @@
 {
   "uid": "pawtrail-service",
   "title": "함께하개 · 서비스 자세히",
-  "description": "맨 위에서 서비스를 고르면 요청 · JVM · DB · Kafka · 로그를 한 서비스 기준으로 봅니다.",
+  "description": "맨 위에서 서비스를 고르면 요청 · 응답 시간(p95 · p99) · JVM · DB · Kafka · 로그를 한 서비스 기준으로 봅니다.",
   "tags": [
     "함께하개"
   ],
@@ -14,7 +14,7 @@
   "editable": false,
   "graphTooltip": 1,
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "templating": {
     "list": [
       {
@@ -114,6 +114,210 @@
     },
     {
       "id": 3,
+      "type": "stat",
+      "title": "p95 응답 시간",
+      "description": "이 서비스에서 요청 95% 가 이 시간 안에 끝났다는 값입니다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{application=\"$application\", instance=~\"$instance\", uri!~\"/actuator.*\"}[5m])))",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "모으는 중",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "p99 응답 시간",
+      "description": "이 서비스에서 요청 99% 가 이 시간 안에 끝났다는 값입니다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{application=\"$application\", instance=~\"$instance\", uri!~\"/actuator.*\"}[5m])))",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "모으는 중",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "250ms 안에 끝난 비율",
+      "description": "이 서비스의 요청 가운데 250ms 안에 끝난 비율입니다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(http_server_requests_seconds_bucket{application=\"$application\", instance=~\"$instance\", uri!~\"/actuator.*\", le=\"0.25\"}[5m])) / sum(rate(http_server_requests_seconds_count{application=\"$application\", instance=~\"$instance\", uri!~\"/actuator.*\"}[5m]))",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "noValue": "모으는 중",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.9
+              },
+              {
+                "color": "green",
+                "value": 0.95
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 6,
       "type": "timeseries",
       "title": "경로별 초당 요청 수",
       "description": "지표 수집 · 헬스체크 요청은 뺍니다.",
@@ -125,7 +329,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 1
+        "y": 5
       },
       "targets": [
         {
@@ -170,7 +374,7 @@
       }
     },
     {
-      "id": 4,
+      "id": 7,
       "type": "timeseries",
       "title": "상태 코드별 초당 요청 수",
       "description": "2xx 는 성공, 4xx 는 요청 쪽 문제, 5xx 는 서버 쪽 문제입니다.",
@@ -182,7 +386,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 1
+        "y": 5
       },
       "targets": [
         {
@@ -227,7 +431,121 @@
       }
     },
     {
-      "id": 5,
+      "id": 8,
+      "type": "timeseries",
+      "title": "경로별 p95 응답 시간",
+      "description": "경로마다 요청 95% 가 이 시간 안에 끝났다는 값입니다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (method, uri, le) (rate(http_server_requests_seconds_bucket{application=\"$application\", instance=~\"$instance\", uri!~\"/actuator.*\"}[5m])))",
+          "legendFormat": "{{method}} {{uri}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "경로별 p99 응답 시간",
+      "description": "경로마다 요청 99% 가 이 시간 안에 끝났다는 값입니다.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (method, uri, le) (rate(http_server_requests_seconds_bucket{application=\"$application\", instance=~\"$instance\", uri!~\"/actuator.*\"}[5m])))",
+          "legendFormat": "{{method}} {{uri}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 10,
       "type": "timeseries",
       "title": "경로별 평균 응답 시간",
       "description": "요청 하나를 처리하는 데 걸린 평균 시간입니다.",
@@ -239,7 +557,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 21
       },
       "targets": [
         {
@@ -284,7 +602,7 @@
       }
     },
     {
-      "id": 6,
+      "id": 11,
       "type": "timeseries",
       "title": "경로별 최대 응답 시간",
       "description": "최근 몇 분 안에서 가장 오래 걸린 요청 하나의 시간입니다.",
@@ -296,7 +614,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 21
       },
       "targets": [
         {
@@ -341,7 +659,7 @@
       }
     },
     {
-      "id": 7,
+      "id": 12,
       "type": "row",
       "title": "JVM",
       "collapsed": false,
@@ -349,12 +667,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 29
       },
       "panels": []
     },
     {
-      "id": 8,
+      "id": 13,
       "type": "timeseries",
       "title": "메모리 (힙 · 힙 밖)",
       "description": "힙은 객체가 사는 곳, 힙 밖은 클래스 정보 · 스레드 · 네트워크 버퍼 몫입니다.",
@@ -366,7 +684,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 18
+        "y": 30
       },
       "targets": [
         {
@@ -411,7 +729,7 @@
       }
     },
     {
-      "id": 9,
+      "id": 14,
       "type": "timeseries",
       "title": "GC 멈춤 (초당)",
       "description": "가비지 컬렉션 때문에 1초에 몇 초만큼 멈췄는지입니다. 0.01 이면 1% 입니다.",
@@ -423,7 +741,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 18
+        "y": 30
       },
       "targets": [
         {
@@ -468,7 +786,7 @@
       }
     },
     {
-      "id": 10,
+      "id": 15,
       "type": "timeseries",
       "title": "스레드",
       "description": "살아 있는 스레드 수입니다.",
@@ -480,7 +798,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 18
+        "y": 30
       },
       "targets": [
         {
@@ -525,7 +843,7 @@
       }
     },
     {
-      "id": 11,
+      "id": 16,
       "type": "timeseries",
       "title": "CPU",
       "description": "이 서비스 프로세스가 쓰는 CPU 의 비율입니다 (서버 전체 CPU 기준).",
@@ -537,7 +855,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 18
+        "y": 30
       },
       "targets": [
         {
@@ -582,7 +900,7 @@
       }
     },
     {
-      "id": 12,
+      "id": 17,
       "type": "row",
       "title": "DB · Kafka",
       "collapsed": false,
@@ -590,12 +908,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 38
       },
       "panels": []
     },
     {
-      "id": 13,
+      "id": 18,
       "type": "timeseries",
       "title": "DB 연결 풀",
       "description": "사용 중 · 쉬는 중 · 기다리는 연결 수입니다. DB 를 쓰지 않는 서비스는 비어 있습니다.",
@@ -607,7 +925,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 27
+        "y": 39
       },
       "targets": [
         {
@@ -679,7 +997,7 @@
       }
     },
     {
-      "id": 14,
+      "id": 19,
       "type": "timeseries",
       "title": "Kafka 소비 처리 (초당)",
       "description": "이 서비스의 Kafka 리스너가 처리한 메시지 수입니다. 결과가 failure 면 처리 중 예외가 난 것입니다.",
@@ -691,7 +1009,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 27
+        "y": 39
       },
       "targets": [
         {
@@ -736,7 +1054,7 @@
       }
     },
     {
-      "id": 15,
+      "id": 20,
       "type": "timeseries",
       "title": "Kafka 소비 지연",
       "description": "아직 읽지 않고 쌓여 있는 메시지 수의 최댓값입니다. 계속 늘면 소비가 밀리는 것입니다.",
@@ -748,7 +1066,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 27
+        "y": 39
       },
       "targets": [
         {
@@ -793,7 +1111,7 @@
       }
     },
     {
-      "id": 16,
+      "id": 21,
       "type": "row",
       "title": "로그",
       "collapsed": false,
@@ -801,12 +1119,12 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 47
       },
       "panels": []
     },
     {
-      "id": 17,
+      "id": 22,
       "type": "timeseries",
       "title": "로그 수 (수준별)",
       "description": "1분마다 남은 로그 수입니다.",
@@ -818,7 +1136,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 48
       },
       "targets": [
         {
@@ -862,7 +1180,7 @@
       }
     },
     {
-      "id": 18,
+      "id": 23,
       "type": "logs",
       "title": "최근 로그",
       "description": "로그를 펼쳐 traceId 옆의 링크를 누르면 그 요청의 추적(Zipkin)으로 갑니다.",
@@ -874,7 +1192,7 @@
         "h": 14,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 54
       },
       "targets": [
         {
