@@ -8,6 +8,8 @@
 #   paw-trail.conf        → /etc/nginx/sites-available/paw-trail.conf (sites-enabled 에 연결)
 #   cloudflare-realip.sh  → /usr/local/sbin/pawtrail-cloudflare-realip (실행해 대역 파일 둘을 만듦)
 #   maintenance.html      → /var/www/paw-trail-maint/maintenance.html
+#   frontend-deploy.sh    → /usr/local/sbin/pawtrail-frontend-deploy (Jenkins 프론트 배포)
+#                           jenkins 계정이 sudo 로 부를 수 있는 것은 이 스크립트 하나 (/etc/sudoers.d/pawtrail-frontend-deploy)
 #
 # Ubuntu 기본 사이트(sites-enabled/default)는 지움
 # 인증서(/etc/ssl/paw-trail)는 이 스크립트가 만들지 않음 — 먼저 있어야 함
@@ -19,7 +21,7 @@ set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "sudo 로 실행할 것: sudo bash $0" >&2; exit 1; }
 D=$(cd "$(dirname "$0")" && pwd)
 
-for f in paw-trail.conf cloudflare-realip.sh maintenance.html; do
+for f in paw-trail.conf cloudflare-realip.sh maintenance.html frontend-deploy.sh; do
   [ -f "$D/$f" ] || { echo "$D/$f 가 없음" >&2; exit 1; }
 done
 if [ ! -f /etc/ssl/paw-trail/origin.pem ] || [ ! -f /etc/ssl/paw-trail/origin.key ]; then
@@ -53,3 +55,17 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl reload nginx
 echo "nginx 설치 · 갱신 끝"
+
+# Jenkins 프론트 배포
+#   Jenkins 가 아직 없으면 스크립트만 놓고 sudo 규칙은 건너뜀 (손 배포는 sudo 로 그대로 씀)
+install -m 755 "$D/frontend-deploy.sh" /usr/local/sbin/pawtrail-frontend-deploy
+if id jenkins >/dev/null 2>&1; then
+  SUDOERS=$(mktemp)
+  echo 'jenkins ALL=(root) NOPASSWD: /usr/local/sbin/pawtrail-frontend-deploy' > "$SUDOERS"
+  visudo -cf "$SUDOERS" >/dev/null
+  install -m 440 "$SUDOERS" /etc/sudoers.d/pawtrail-frontend-deploy
+  rm -f "$SUDOERS"
+  echo "프론트 배포 — pawtrail-frontend-deploy · jenkins 는 이 스크립트 하나만 sudo"
+else
+  echo "프론트 배포 — pawtrail-frontend-deploy (jenkins 계정이 없어 sudo 규칙은 건너뜀)"
+fi
