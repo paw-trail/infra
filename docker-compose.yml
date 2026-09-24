@@ -1198,6 +1198,8 @@ services:
       GF_USERS_VIEWERS_CAN_EDIT: "true"
       # 로그인한 사람의 이메일로 바깥(Gravatar)에 그림을 요청하지 않게 함
       GF_SECURITY_DISABLE_GRAVATAR: "true"
+      # 로그인하면 처음 뜨는 화면 — 파일로 둔 대시보드 「한눈에」
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/json/overview.json
       # 플러그인 설치 시도를 막아 오프라인에서도 조용히 뜸
       GF_INSTALL_PLUGINS: ""
     ports:

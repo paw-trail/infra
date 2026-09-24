@@ -12,8 +12,11 @@ apiVersion: 1
 
 datasources:
 
+  # uid 를 정해 두는 것은 대시보드 JSON 이 이 이름으로 데이터 소스를 가리키기 때문임
+  # 정하지 않으면 Grafana 가 무작위 uid 를 붙여 대시보드가 데이터 소스를 못 찾음
   - name: Prometheus
     type: prometheus
+    uid: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
@@ -21,17 +24,22 @@ datasources:
 
   - name: Loki
     type: loki
+    uid: loki
     access: proxy
     url: http://loki:3100
     editable: false
     jsonData:
-      # 로그에 찍힌 traceId 를 눌러 Zipkin 트레이스로 건너뛰게 함
-      # 우리는 logging.pattern.level 에 traceId 를 이미 박아 두었으므로 바로 걸림
+      # 로그의 traceId 를 눌러 Zipkin 추적으로 건너뛰게 함
+      #   Loki 로 가는 로그 본문은 메시지뿐이라(%msg) traceId 가 본문에 없음
+      #   traceId 는 structured metadata 로 붙어 오므로(common 의 logback-loki-appender.xml)
+      #   본문을 정규식으로 찾지 않고 그 이름의 값(label)을 집음
       derivedFields:
-        - name: TraceID
-          matcherRegex: "([0-9a-f]{32})"
+        - name: traceId
+          matcherType: label
+          matcherRegex: traceId
           url: "$${__value.raw}"
           datasourceUid: zipkin
+          urlDisplayLabel: Zipkin 에서 추적 보기
 
   - name: Zipkin
     type: zipkin

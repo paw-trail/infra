@@ -1,0 +1,24 @@
+# =============================================================================
+# Grafana 대시보드 자동 등록
+# =============================================================================
+# json/ 폴더의 대시보드를 컨테이너가 뜰 때 읽어 「함께하개」 폴더에 둠
+#   한눈에         json/overview.json   로그인하면 처음 뜨는 화면 (compose 의 GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH)
+#   서비스 자세히  json/service.json    서비스를 하나 골라 파고듦
+#
+# 화면에서는 고칠 수 없게 둠 — 고치려면 JSON 을 고쳐 커밋하고 서버에서 git pull
+#   Grafana 가 1분마다 파일을 다시 읽으므로 컨테이너를 다시 켤 필요는 없음
+# =============================================================================
+
+apiVersion: 1
+
+providers:
+  - name: pawtrail
+    orgId: 1
+    folder: 함께하개
+    type: file
+    disableDeletion: true
+    editable: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
