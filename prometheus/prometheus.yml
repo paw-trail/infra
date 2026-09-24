@@ -1,25 +1,28 @@
 # =============================================================================
-# Prometheus 수집 설정 (로컬 개발용)
+# Prometheus 수집 설정 (로컬 · 서버 공통)
 # =============================================================================
-# * 타깃을 localhost 가 아니라 host.docker.internal 로 잡는 이유
-#   Prometheus 는 컨테이너 안에서 도는데 도메인 서비스는 IntelliJ 에서 돎
-#   컨테이너 입장에서 localhost 는 자기 자신이라 스프링 서비스를 못 찾음
-#   host.docker.internal 은 Docker Desktop 이 호스트를 가리키도록 넣어 주는 이름임
+# 스프링 서비스는 유레카에 물어서 찾음 (eureka_sd_configs)
+#   유레카에 등록된 인스턴스마다 IP:포트 의 /actuator/prometheus 를 모음
+#   서비스가 늘어도 이 파일을 고칠 필요가 없고, 배포 중 잠깐 뜨는 임시 인스턴스(-next)도 따라감
+#   유레카가 잠깐 죽어도 마지막으로 받은 목록으로 계속 모음
 #
-# * 배포 환경에서는 이 파일을 그대로 쓰면 안 됨
-#   EC2 에서는 서비스가 전부 컨테이너이므로 타깃이 place-service:8084 처럼 서비스명이 되고
-#   리눅스에는 host.docker.internal 이 기본으로 없음
-#   그때 prometheus-prod.yml 을 따로 두고 compose override 로 갈아끼울 것
+#   예전에는 host.docker.internal:포트 목록을 손으로 적었음
+#     서비스를 IntelliJ 로 호스트에서 돌리던 로컬 개발용이었고
+#     서버(리눅스)에는 host.docker.internal 이 없어 서비스가 전부 down 이었음
+#     목록도 새 서비스 넷(weather · report · notification · review)보다 늦게 따라갔음
 #
-# 서비스가 늘면 targets 에 포트를 계속 추가함
-# 14개가 되면 목록이 길어지므로 유레카 기반 디스커버리 전환을 그때 판단
+# 로컬에서 IntelliJ 로 띄운 서비스
+#   유레카에 호스트의 IP 로 등록됨 (prefer-ip-address)
+#   그 IP 가 컨테이너에서 닿는 환경이면 그대로 모이고, 닿지 않으면 그 서비스만 down 으로 보임
+#   컨테이너로 띄운 서비스는 늘 모임
+#
+# 이 파일은 파일 하나를 컨테이너에 붙여 둔 것이라
+# git pull 로 바뀐 뒤에는 다시 읽기(/-/reload)로는 안 보이고 컨테이너를 다시 시작해야 함
 # =============================================================================
 
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
-  external_labels:
-    env: local
 
 scrape_configs:
 
@@ -28,105 +31,35 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
-  # 스프링 서비스
+  # 스프링 서비스 — 유레카에 등록된 인스턴스 전부
   # 액추에이터 노출 경로가 /actuator/prometheus 라 metrics_path 를 바꿔야 함
   # 기본값 /metrics 로 두면 404 만 받고 조용히 아무것도 안 모임
-  #
-  # 포트 배정
-  #   플랫폼    gateway 8080 / eureka 8761 / config 8888
-  #   도메인    8081 부터 순서대로 8094 까지
-  #   template  8095 (service-template 을 그대로 띄울 때)
-  # 서비스가 늘어날 때마다 targets 에 추가함
   - job_name: spring-services
     metrics_path: /actuator/prometheus
+    eureka_sd_configs:
+      - server: http://eureka-server:8761/eureka
+        refresh_interval: 30s
+    relabel_configs:
+      # 유레카의 앱 이름은 대문자(AUTH-SERVICE)라 소문자로 바꿔 application 라벨에 둠
+      # Loki 의 app 라벨과 같은 이름이 되어 대시보드에서 둘을 한 변수로 고를 수 있음
+      - source_labels: [__meta_eureka_app_name]
+        target_label: application
+        action: lowercase
+      # 인스턴스 이름은 유레카의 인스턴스 id (컨테이너 호스트 이름:서비스:포트)
+      # 배포 중에는 한 서비스에 인스턴스가 둘 보임
+      - source_labels: [__meta_eureka_app_instance_id]
+        target_label: instance
+
+  # 유레카 자신 — 자기 자신에게는 등록하지 않으므로 따로 적음
+  # 로컬 · 서버 모두 컨테이너로 돌아 이름으로 찾음
+  - job_name: eureka-server
+    metrics_path: /actuator/prometheus
     static_configs:
-      - targets:
-          - "host.docker.internal:8080"
-        labels:
-          application: gateway-server
-
-      - targets:
-          - "host.docker.internal:8888"
-        labels:
-          application: config-server
-
-      - targets:
-          - "host.docker.internal:8761"
+      - targets: ["eureka-server:8761"]
         labels:
           application: eureka-server
 
-      - targets:
-          - "host.docker.internal:8081"
-        labels:
-          application: auth-service
-          
-      - targets:
-          - "host.docker.internal:8082"
-        labels:
-          application: user-service
-
-      - targets:
-          - "host.docker.internal:8083"
-        labels:
-          application: pet-service
-
-      - targets:
-          - "host.docker.internal:8084"
-        labels:
-          application: place-service
-
-      - targets:
-          - "host.docker.internal:8085"
-        labels:
-          application: policy-service
-
-      - targets:
-          - "host.docker.internal:8086"
-        labels:
-          application: verdict-service
-
-      - targets:
-          - "host.docker.internal:8087"
-        labels:
-          application: search-service
-
-      # ingest 는 8088 임, 도메인 순서(8081~)와 어긋나 보이지만 그 배정이 맞음
-      - targets:
-          - "host.docker.internal:8088"
-        labels:
-          application: ingest-service
-
-      - targets:
-          - "host.docker.internal:8089"
-        labels:
-          application: extract-service
-
-      - targets:
-          - "host.docker.internal:8090"
-        labels:
-          application: weather-service
-
-      - targets:
-          - "host.docker.internal:8092"
-        labels:
-          application: report-service
-
-      - targets:
-          - "host.docker.internal:8093"
-        labels:
-          application: notification-service
-
-      - targets:
-          - "host.docker.internal:8094"
-        labels:
-          application: review-service
-
-      - targets:
-          - "host.docker.internal:8095"
-        labels:
-          application: template-service
-
-  # Loki 자체 메트릭
+  # Loki
   - job_name: loki
     static_configs:
       - targets: ["loki:3100"]
