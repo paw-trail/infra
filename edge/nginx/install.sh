@@ -6,6 +6,8 @@
 # 여러 번 돌려도 결과가 같음 (설정을 고친 뒤 다시 돌리면 갱신됨)
 #
 #   paw-trail.conf        → /etc/nginx/sites-available/paw-trail.conf (sites-enabled 에 연결)
+#   grafana.conf          → /etc/nginx/sites-available/grafana.conf (sites-enabled 에 연결)
+#                           grafana.paw-trail.click → WireGuard 터널 → 미니 PC 의 Grafana
 #   cloudflare-realip.sh  → /usr/local/sbin/pawtrail-cloudflare-realip (실행해 대역 파일 둘을 만듦)
 #   maintenance.html      → /var/www/paw-trail-maint/maintenance.html
 #   frontend-deploy.sh    → /usr/local/sbin/pawtrail-frontend-deploy (Jenkins 프론트 배포)
@@ -21,7 +23,7 @@ set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "sudo 로 실행할 것: sudo bash $0" >&2; exit 1; }
 D=$(cd "$(dirname "$0")" && pwd)
 
-for f in paw-trail.conf cloudflare-realip.sh maintenance.html frontend-deploy.sh; do
+for f in paw-trail.conf grafana.conf cloudflare-realip.sh maintenance.html frontend-deploy.sh; do
   [ -f "$D/$f" ] || { echo "$D/$f 가 없음" >&2; exit 1; }
 done
 if [ ! -f /etc/ssl/paw-trail/origin.pem ] || [ ! -f /etc/ssl/paw-trail/origin.key ]; then
@@ -50,6 +52,8 @@ install -m 755 "$D/cloudflare-realip.sh" /usr/local/sbin/pawtrail-cloudflare-rea
 
 install -m 644 "$D/paw-trail.conf" /etc/nginx/sites-available/paw-trail.conf
 ln -sfn /etc/nginx/sites-available/paw-trail.conf /etc/nginx/sites-enabled/paw-trail.conf
+install -m 644 "$D/grafana.conf" /etc/nginx/sites-available/grafana.conf
+ln -sfn /etc/nginx/sites-available/grafana.conf /etc/nginx/sites-enabled/grafana.conf
 rm -f /etc/nginx/sites-enabled/default
 
 nginx -t

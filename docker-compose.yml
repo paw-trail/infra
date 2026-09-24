@@ -1060,10 +1060,13 @@ services:
   # ---------------------------------------------------------------------------
   # Prometheus
   # ---------------------------------------------------------------------------
-  # TODO: 첫 pull 이후 실제 버전으로 고정할 것
-  #      docker image inspect prom/prometheus:latest --format '{{index .Config.Labels "org.opencontainers.image.version"}}'
+  # 관측 이미지 넷(prometheus · loki · zipkin · grafana)은 판을 고정함
+  #   latest 로 두면 다시 만들 때마다 모르는 사이 판이 바뀜
+  #   올릴 때는 이 줄과 README 4-4 를 함께 고침
+  #
+  # 모은 지표는 prometheus_data 볼륨에 남김 — 없으면 컨테이너를 다시 만들 때마다 지표가 비어 대시보드의 흐름이 끊김
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.14.0
     container_name: pawtrail-prometheus
     profiles: [observability]
     environment:
@@ -1079,6 +1082,7 @@ services:
       - "${PUBLISH_ADDR:-0.0.0.0}:9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
     mem_limit: 512m
     networks: [pawtrail]
 
@@ -1090,9 +1094,11 @@ services:
   # 컨테이너 밖에서 도는 프로세스의 로그는 그 둘로는 잡히지 않음
   #
   # 이미지에 기본 설정 파일이 들어 있어 단일 바이너리 모드로 바로 뜸
-  # 로컬에서는 보관이 필요 없으므로 볼륨을 잡지 않음
+  # 모은 로그는 loki_data 볼륨(/loki)에 남김
+  #   없으면 컨테이너를 다시 만들 때마다 로그가 비어 아래 30일 보관이 사실상 지켜지지 않음
+  #   /loki 는 이미지 안에 실행 사용자(10001) 소유로 있어 빈 볼륨도 그 권한으로 채워짐
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.7.8
     container_name: pawtrail-loki
     profiles: [observability]
     # 이미지에 든 기본 설정 파일은 그대로 두고 보관 기간만 더함
@@ -1112,6 +1118,8 @@ services:
       TZ: Asia/Seoul
     ports:
       - "${PUBLISH_ADDR:-0.0.0.0}:3100:3100"
+    volumes:
+      - loki_data:/loki
     mem_limit: 512m
     networks: [pawtrail]
 
@@ -1138,7 +1146,7 @@ services:
   #
   # mem_limit 1g 는 힙 512m 에 메타스페이스 · 스레드 · 네트워크 버퍼 몫을 더한 값임
   zipkin:
-    image: openzipkin/zipkin:latest
+    image: openzipkin/zipkin:3.6.1
     container_name: pawtrail-zipkin
     profiles: [observability]
     environment:
@@ -1154,10 +1162,16 @@ services:
   # Grafana
   # ---------------------------------------------------------------------------
   # 데이터소스 3개는 provisioning 으로 자동 등록됨
-  # 볼륨을 안 잡았으므로 컨테이너를 새로 만들면 대시보드는 사라지지만
-  # 데이터소스는 매번 같은 상태로 다시 뜸
+  # 계정 · 설정은 grafana_data 볼륨(/var/lib/grafana)에 남김
+  #
+  # 서버에서는 grafana.paw-trail.click 으로 바깥에 열리고 Grafana 로그인으로만 막음 (README 4-13)
+  #   로컬과 서버가 갈리는 값은 .env 로 고름 — 비우면 로컬 기본값
+  #     GRAFANA_ADDR           받는 주소 · 서버 10.8.0.2 (WireGuard 터널 주소 · Lightsail 만 닿음)
+  #     GRAFANA_ANONYMOUS      로그인 없이 보기 · 서버 false
+  #     GRAFANA_ROOT_URL       바깥 주소 · 서버 https://grafana.paw-trail.click/
+  #     GRAFANA_COOKIE_SECURE  https 로만 쿠키 · 서버 true
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.2.2
     container_name: pawtrail-grafana
     profiles: [observability]
     depends_on:
@@ -1166,26 +1180,41 @@ services:
       - zipkin
     environment:
       TZ: Asia/Seoul
+      # 첫 관리자 계정 — grafana_data 볼륨이 처음 만들어질 때 한 번만 쓰임
+      #   그 뒤에 .env 를 바꿔도 반영되지 않음
+      #   비밀번호를 바꾸려면 docker exec pawtrail-grafana grafana cli admin reset-admin-password <새 비밀번호>
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
-      # 첫 로그인 시 비밀번호 변경을 강요하지 않음
       GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION: "false"
-      # 로컬에서는 익명 열람을 허용해 매번 로그인하지 않게 함
-      # 다만 익명은 Viewer 라 데이터소스 메뉴가 보이지 않으므로 설정을 볼 때는 로그인해야 함
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      # 로컬은 익명 열람을 켜서 매번 로그인하지 않게 함 · 서버는 끔
+      #   익명은 Viewer 라 데이터소스 메뉴가 보이지 않으므로 설정을 볼 때는 로그인해야 함
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS:-true}
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000/}
+      GF_SECURITY_COOKIE_SECURE: ${GRAFANA_COOKIE_SECURE:-false}
+      # 계정은 관리자가 만듦 — 스스로 가입하지 못하게
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # 보기 계정(Viewer)도 Explore 로 로그 · 추적을 찾게 함 — 대시보드를 저장하지는 못함
+      GF_USERS_VIEWERS_CAN_EDIT: "true"
+      # 로그인한 사람의 이메일로 바깥(Gravatar)에 그림을 요청하지 않게 함
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
       # 플러그인 설치 시도를 막아 오프라인에서도 조용히 뜸
       GF_INSTALL_PLUGINS: ""
     ports:
       # 우리 포트 배정은 3000 이고 프론트를 5173 으로 뺀 이유가 이것임
-      - "${PUBLISH_ADDR:-0.0.0.0}:3000:3000"
+      - "${GRAFANA_ADDR:-0.0.0.0}:3000:3000"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
     mem_limit: 512m
     networks: [pawtrail]
 
 volumes:
   postgres_data:
+  # 관측 — 다시 만들어도 남아야 하는 것
+  prometheus_data:
+  loki_data:
+  grafana_data:
   # Kafka 로그 디렉터리는 named volume 으로 잡지 않음
   # apache/kafka 이미지는 비루트 사용자로 도는데 이미지에 없는 경로에 빈 볼륨을 마운트하면
   # 그 디렉터리가 root 소유로 생성되어 브로커가 쓰지 못하고 기동에 실패함
